@@ -1,6 +1,7 @@
 {
   "name": "@cyanheads/finnhub-mcp-server",
-  "version": "0.1.0",
+  "version": "0.1.1",
+  "mcpName": "io.github.cyanheads/finnhub-mcp-server",
   "description": "Real-time US-equity quotes, company fundamentals, earnings, analyst trends, and financial news via Finnhub. STDIO or Streamable HTTP.",
   "type": "module",
   "main": "dist/index.js",
