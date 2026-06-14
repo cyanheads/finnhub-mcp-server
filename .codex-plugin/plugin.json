@@ -1,0 +1,40 @@
+{
+  "name": "finnhub-mcp-server",
+  "version": "0.1.0",
+  "description": "Real-time US-equity quotes, company fundamentals, earnings, analyst trends, and news via Finnhub.",
+  "author": {
+    "name": "Casey Hand",
+    "email": "casey@caseyjhand.com",
+    "url": "https://caseyjhand.com"
+  },
+  "homepage": "https://github.com/cyanheads/finnhub-mcp-server#readme",
+  "repository": "https://github.com/cyanheads/finnhub-mcp-server",
+  "license": "Apache-2.0",
+  "keywords": [
+    "mcp",
+    "mcp-server",
+    "model-context-protocol",
+    "typescript",
+    "bun",
+    "stdio",
+    "streamable-http",
+    "finnhub",
+    "finance",
+    "stocks",
+    "market-data",
+    "quotes",
+    "earnings",
+    "stock-market"
+  ],
+  "mcpServers": "./.codex-plugin/mcp.json",
+  "interface": {
+    "displayName": "finnhub-mcp-server",
+    "shortDescription": "Real-time US-equity market data via Finnhub.",
+    "longDescription": "Six tools covering real-time US-equity market data via the Finnhub REST API: resolve a company name to a US ticker, fetch a live quote paired with market-open status (never presenting a stale price as live), get one-call company context (profile + fundamentals + peers), read earnings history and the upcoming-releases calendar, pull company or market news, and surface analyst recommendation trends. Free tier covers US stocks only; a free Finnhub API key is required.",
+    "developerName": "Casey Hand",
+    "category": "Finance",
+    "capabilities": ["Read"],
+    "websiteURL": "https://github.com/cyanheads/finnhub-mcp-server",
+    "defaultPrompt": []
+  }
+}

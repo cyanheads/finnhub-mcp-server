@@ -1,0 +1,21 @@
+{
+  "name": "finnhub-mcp-server",
+  "version": "0.1.0",
+  "description": "Real-time US-equity quotes, company fundamentals, earnings, analyst trends, and news via Finnhub.",
+  "author": {
+    "name": "Casey Hand"
+  },
+  "homepage": "https://github.com/cyanheads/finnhub-mcp-server#readme",
+  "repository": "https://github.com/cyanheads/finnhub-mcp-server",
+  "license": "Apache-2.0",
+  "mcpServers": {
+    "finnhub-mcp-server": {
+      "command": "npx",
+      "args": ["-y", "@cyanheads/finnhub-mcp-server"],
+      "env": {
+        "MCP_TRANSPORT_TYPE": "stdio",
+        "FINNHUB_API_KEY": "your-api-key"
+      }
+    }
+  }
+}
