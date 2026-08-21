@@ -115,7 +115,7 @@ export const getEarnings = tool('finnhub_get_earnings', {
   errors: [
     {
       reason: 'missing_symbol',
-      code: JsonRpcErrorCode.InvalidParams,
+      code: JsonRpcErrorCode.ValidationError,
       when: "mode 'history' was requested without a symbol.",
       recovery:
         'Provide a `symbol` for history mode, or switch to mode: calendar for the market-wide upcoming-releases feed.',

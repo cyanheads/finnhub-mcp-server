@@ -67,8 +67,8 @@ describe('getNews', () => {
     const ctx = createMockContext({ errors: getNews.errors });
     const input = getNews.input.parse({ mode: 'company' });
 
-    const err = await getNews.handler(input, ctx).catch((e) => e);
-    expect(err.code).toBe(JsonRpcErrorCode.InvalidParams);
+    const err = await Promise.resolve(getNews.handler(input, ctx)).catch((e) => e);
+    expect(err.code).toBe(JsonRpcErrorCode.ValidationError);
     expect(err.data.reason).toBe('missing_symbol');
   });
 
@@ -77,7 +77,7 @@ describe('getNews', () => {
     const ctx = createMockContext({ errors: getNews.errors });
     const input = getNews.input.parse({ mode: 'company', symbol: 'SHOP.TO' });
 
-    const err = await getNews.handler(input, ctx).catch((e) => e);
+    const err = await Promise.resolve(getNews.handler(input, ctx)).catch((e) => e);
     expect(err.code).toBe(JsonRpcErrorCode.Forbidden);
     expect(err.data.reason).toBe('not_us_or_paid');
   });

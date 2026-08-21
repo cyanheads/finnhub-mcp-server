@@ -70,8 +70,8 @@ describe('getEarnings', () => {
     const ctx = createMockContext({ errors: getEarnings.errors });
     const input = getEarnings.input.parse({ mode: 'history' });
 
-    const err = await getEarnings.handler(input, ctx).catch((e) => e);
-    expect(err.code).toBe(JsonRpcErrorCode.InvalidParams);
+    const err = await Promise.resolve(getEarnings.handler(input, ctx)).catch((e) => e);
+    expect(err.code).toBe(JsonRpcErrorCode.ValidationError);
     expect(err.data.reason).toBe('missing_symbol');
   });
 
@@ -80,7 +80,7 @@ describe('getEarnings', () => {
     const ctx = createMockContext({ errors: getEarnings.errors });
     const input = getEarnings.input.parse({ mode: 'history', symbol: 'SAP.DE' });
 
-    const err = await getEarnings.handler(input, ctx).catch((e) => e);
+    const err = await Promise.resolve(getEarnings.handler(input, ctx)).catch((e) => e);
     expect(err.code).toBe(JsonRpcErrorCode.Forbidden);
     expect(err.data.reason).toBe('not_us_or_paid');
   });

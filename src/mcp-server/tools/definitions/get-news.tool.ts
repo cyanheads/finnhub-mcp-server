@@ -102,7 +102,7 @@ export const getNews = tool('finnhub_get_news', {
   errors: [
     {
       reason: 'missing_symbol',
-      code: JsonRpcErrorCode.InvalidParams,
+      code: JsonRpcErrorCode.ValidationError,
       when: "mode 'company' was requested without a symbol.",
       recovery: 'Provide a `symbol` for company mode, or switch to mode: market with a category.',
     },
