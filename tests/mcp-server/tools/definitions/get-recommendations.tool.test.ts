@@ -67,7 +67,7 @@ describe('getRecommendations', () => {
     const ctx = createMockContext({ errors: getRecommendations.errors });
     const input = getRecommendations.input.parse({ symbol: 'ZZZZBOGUS' });
 
-    const err = await getRecommendations.handler(input, ctx).catch((e) => e);
+    const err = await Promise.resolve(getRecommendations.handler(input, ctx)).catch((e) => e);
     expect(err.code).toBe(JsonRpcErrorCode.NotFound);
     expect(err.data.reason).toBe('no_coverage');
   });
@@ -77,7 +77,7 @@ describe('getRecommendations', () => {
     const ctx = createMockContext({ errors: getRecommendations.errors });
     const input = getRecommendations.input.parse({ symbol: 'SAP.DE' });
 
-    const err = await getRecommendations.handler(input, ctx).catch((e) => e);
+    const err = await Promise.resolve(getRecommendations.handler(input, ctx)).catch((e) => e);
     expect(err.code).toBe(JsonRpcErrorCode.Forbidden);
     expect(err.data.reason).toBe('not_us_or_paid');
   });

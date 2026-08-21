@@ -103,7 +103,7 @@ describe('getCompany', () => {
     const ctx = createMockContext({ errors: getCompany.errors });
     const input = getCompany.input.parse({ symbol: 'ZZZZBOGUS' });
 
-    const err = await getCompany.handler(input, ctx).catch((e) => e);
+    const err = await Promise.resolve(getCompany.handler(input, ctx)).catch((e) => e);
     expect(err.code).toBe(JsonRpcErrorCode.NotFound);
     expect(err.data.reason).toBe('symbol_not_found');
   });
@@ -117,7 +117,7 @@ describe('getCompany', () => {
     const ctx = createMockContext({ errors: getCompany.errors });
     const input = getCompany.input.parse({ symbol: 'SAP.DE' });
 
-    const err = await getCompany.handler(input, ctx).catch((e) => e);
+    const err = await Promise.resolve(getCompany.handler(input, ctx)).catch((e) => e);
     expect(err.code).toBe(JsonRpcErrorCode.Forbidden);
     expect(err.data.reason).toBe('not_us_or_paid');
   });

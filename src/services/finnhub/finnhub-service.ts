@@ -8,10 +8,10 @@
  * @module services/finnhub/finnhub-service
  */
 
+import type { Context } from '@cyanheads/mcp-ts-core';
 import type { AppConfig } from '@cyanheads/mcp-ts-core/config';
 import { configurationError, JsonRpcErrorCode, McpError } from '@cyanheads/mcp-ts-core/errors';
 import type { StorageService } from '@cyanheads/mcp-ts-core/storage';
-import type { RequestContextLike } from '@cyanheads/mcp-ts-core/utils';
 import { fetchWithTimeout, withRetry } from '@cyanheads/mcp-ts-core/utils';
 import { getServerConfig } from '@/config/server-config.js';
 import type {
@@ -51,17 +51,17 @@ export class FinnhubService {
   }
 
   /** `GET /search?q={query}` — resolve a name/ticker fragment to symbols. */
-  search(query: string, ctx: RequestContextLike): Promise<FinnhubSearchResponse> {
+  search(query: string, ctx: Context): Promise<FinnhubSearchResponse> {
     return this.request<FinnhubSearchResponse>('/search', { q: query }, 'search', ctx);
   }
 
   /** `GET /quote?symbol={symbol}` — real-time price snapshot. */
-  quote(symbol: string, ctx: RequestContextLike): Promise<FinnhubQuote> {
+  quote(symbol: string, ctx: Context): Promise<FinnhubQuote> {
     return this.request<FinnhubQuote>('/quote', { symbol }, 'quote', ctx);
   }
 
   /** `GET /stock/market-status?exchange={exchange}` — live market-open flag. */
-  marketStatus(exchange: string, ctx: RequestContextLike): Promise<FinnhubMarketStatus> {
+  marketStatus(exchange: string, ctx: Context): Promise<FinnhubMarketStatus> {
     return this.request<FinnhubMarketStatus>(
       '/stock/market-status',
       { exchange },
@@ -71,12 +71,12 @@ export class FinnhubService {
   }
 
   /** `GET /stock/profile2?symbol={symbol}` — company profile (`{}` if unknown). */
-  profile(symbol: string, ctx: RequestContextLike): Promise<FinnhubProfile> {
+  profile(symbol: string, ctx: Context): Promise<FinnhubProfile> {
     return this.request<FinnhubProfile>('/stock/profile2', { symbol }, 'profile', ctx);
   }
 
   /** `GET /stock/metric?symbol={symbol}&metric=all` — fundamentals (~100 keys). */
-  metrics(symbol: string, ctx: RequestContextLike): Promise<FinnhubMetricResponse> {
+  metrics(symbol: string, ctx: Context): Promise<FinnhubMetricResponse> {
     return this.request<FinnhubMetricResponse>(
       '/stock/metric',
       { symbol, metric: 'all' },
@@ -86,21 +86,17 @@ export class FinnhubService {
   }
 
   /** `GET /stock/peers?symbol={symbol}` — sector peer symbols (includes the query). */
-  peers(symbol: string, ctx: RequestContextLike): Promise<string[]> {
+  peers(symbol: string, ctx: Context): Promise<string[]> {
     return this.request<string[]>('/stock/peers', { symbol }, 'peers', ctx);
   }
 
   /** `GET /stock/earnings?symbol={symbol}` — past quarters, newest first. */
-  earnings(symbol: string, ctx: RequestContextLike): Promise<FinnhubEarning[]> {
+  earnings(symbol: string, ctx: Context): Promise<FinnhubEarning[]> {
     return this.request<FinnhubEarning[]>('/stock/earnings', { symbol }, 'earnings', ctx);
   }
 
   /** `GET /calendar/earnings?from={from}&to={to}` — upcoming releases window. */
-  earningsCalendar(
-    from: string,
-    to: string,
-    ctx: RequestContextLike,
-  ): Promise<FinnhubEarningsCalendar> {
+  earningsCalendar(from: string, to: string, ctx: Context): Promise<FinnhubEarningsCalendar> {
     return this.request<FinnhubEarningsCalendar>(
       '/calendar/earnings',
       { from, to },
@@ -114,7 +110,7 @@ export class FinnhubService {
     symbol: string,
     from: string,
     to: string,
-    ctx: RequestContextLike,
+    ctx: Context,
   ): Promise<FinnhubNewsArticle[]> {
     return this.request<FinnhubNewsArticle[]>(
       '/company-news',
@@ -125,12 +121,12 @@ export class FinnhubService {
   }
 
   /** `GET /news?category={category}` — market-wide headlines. */
-  marketNews(category: string, ctx: RequestContextLike): Promise<FinnhubNewsArticle[]> {
+  marketNews(category: string, ctx: Context): Promise<FinnhubNewsArticle[]> {
     return this.request<FinnhubNewsArticle[]>('/news', { category }, 'marketNews', ctx);
   }
 
   /** `GET /stock/recommendation?symbol={symbol}` — analyst trends, empty if no coverage. */
-  recommendations(symbol: string, ctx: RequestContextLike): Promise<FinnhubRecommendation[]> {
+  recommendations(symbol: string, ctx: Context): Promise<FinnhubRecommendation[]> {
     return this.request<FinnhubRecommendation[]>(
       '/stock/recommendation',
       { symbol },
@@ -156,14 +152,14 @@ export class FinnhubService {
     path: string,
     params: Record<string, string>,
     operation: string,
-    ctx: RequestContextLike,
+    ctx: Context,
   ): Promise<T> {
     const url = new URL(`${this.baseUrl}${path}`);
     for (const [key, value] of Object.entries(params)) {
       url.searchParams.set(key, value);
     }
     url.searchParams.set('token', this.apiKey);
-    const signal = (ctx as { signal?: AbortSignal }).signal;
+    const signal = ctx.signal;
 
     return withRetry(
       async () => {

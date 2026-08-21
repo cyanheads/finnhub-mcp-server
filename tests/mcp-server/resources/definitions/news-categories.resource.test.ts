@@ -10,7 +10,7 @@ import { newsCategoriesResource } from '@/mcp-server/resources/definitions/news-
 describe('newsCategoriesResource', () => {
   it('returns the four valid market-news categories', async () => {
     const ctx = createMockContext();
-    const params = newsCategoriesResource.params.parse({});
+    const params = newsCategoriesResource.params!.parse({});
     const result = await newsCategoriesResource.handler(params, ctx);
 
     const ids = result.categories.map((c) => c.id);
@@ -21,7 +21,9 @@ describe('newsCategoriesResource', () => {
   });
 
   it('lists itself as a readable resource', async () => {
-    const listing = await newsCategoriesResource.list!();
+    const listing = await newsCategoriesResource.list!(
+      {} as Parameters<NonNullable<typeof newsCategoriesResource.list>>[0],
+    );
     expect(listing.resources).toHaveLength(1);
     expect(listing.resources[0]?.uri).toBe('finnhub://news-categories');
   });

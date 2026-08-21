@@ -89,7 +89,7 @@ describe('getQuote', () => {
     const ctx = createMockContext({ errors: getQuote.errors });
     const input = getQuote.input.parse({ symbol: 'ZZZZBOGUS' });
 
-    const err = await getQuote.handler(input, ctx).catch((e) => e);
+    const err = await Promise.resolve(getQuote.handler(input, ctx)).catch((e) => e);
     expect(err.code).toBe(JsonRpcErrorCode.NotFound);
     expect(err.data.reason).toBe('symbol_not_found');
   });
@@ -102,7 +102,7 @@ describe('getQuote', () => {
     const ctx = createMockContext({ errors: getQuote.errors });
     const input = getQuote.input.parse({ symbol: 'SHOP.TO' });
 
-    const err = await getQuote.handler(input, ctx).catch((e) => e);
+    const err = await Promise.resolve(getQuote.handler(input, ctx)).catch((e) => e);
     expect(err.code).toBe(JsonRpcErrorCode.Forbidden);
     expect(err.data.reason).toBe('not_us_or_paid');
   });
