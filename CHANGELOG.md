@@ -2,6 +2,10 @@
 
 All notable changes to this project. Each entry links to its full per-version file in [changelog/](changelog/).
 
+## [0.1.2](changelog/0.1.x/0.1.2.md) — 2026-08-21
+
+MCP SDK v2 via @cyanheads/mcp-ts-core ^0.12.3: protocol revision 2026-07-28 served beside 2025-era clients, strict tool inputs, error-envelope output schemas. Missing-symbol errors reclassified ValidationError. Bun 1.4.0 images, supply-chain install guard, TypeScript 7.
+
 ## [0.1.1](changelog/0.1.x/0.1.1.md) — 2026-06-14
 
 Add the package.json mcpName field so the server can publish to the MCP Registry.

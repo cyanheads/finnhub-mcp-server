@@ -2,9 +2,14 @@
   "manifest_version": "0.3",
   "name": "finnhub-mcp-server",
   "display_name": "finnhub-mcp-server",
-  "version": "0.1.1",
+  "version": "0.1.2",
+  "license": "Apache-2.0",
   "description": "Real-time US-equity quotes, company fundamentals, earnings, analyst trends, and news via Finnhub.",
-  "author": { "name": "Casey Hand", "email": "casey@caseyjhand.com" },
+  "author": {
+    "name": "Casey Hand",
+    "email": "casey@caseyjhand.com",
+    "url": "https://caseyjhand.com"
+  },
   "repository": { "type": "git", "url": "https://github.com/cyanheads/finnhub-mcp-server" },
   "server": {
     "type": "node",
