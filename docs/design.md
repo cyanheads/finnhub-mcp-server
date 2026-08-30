@@ -1,7 +1,7 @@
 # finnhub-mcp-server — Design
 
 **Package:** `@cyanheads/finnhub-mcp-server`
-**Framework:** `@cyanheads/mcp-ts-core` `^0.10.6` (held — do not bump)
+**Framework:** `@cyanheads/mcp-ts-core` `^0.12.3`
 **Display identity:** `finnhub-mcp-server` (hyphenated machine name everywhere — `createApp` `title`, manifest `display_name`; never Title Case)
 
 ## MCP Surface
@@ -10,7 +10,7 @@
 
 | Name | Description | Key Inputs | Annotations |
 |:-----|:------------|:-----------|:------------|
-| `finnhub_search_symbols` | Resolve a company name or partial ticker to Finnhub stock symbols. The entry point for every other tool — users say "Microsoft", the rest of the surface needs "MSFT". Returns matched symbols with display symbol, description, and security type, best US match first. | `query`, `limit?` | `readOnlyHint`, `openWorldHint` |
+| `finnhub_search_symbols` | Resolve a company name or partial ticker to Finnhub stock symbols. The entry point for every other tool — users say "Microsoft", the rest of the surface needs "MSFT". Returns matched symbols with display symbol, description, and security type, best likely-US match first. | `query`, `limit?` | `readOnlyHint`, `openWorldHint` |
 | `finnhub_get_quote` | Real-time price quote for one US stock symbol: current, change, %change, open, high, low, previous close. Pairs the quote with live market-status so the response states whether the price is live or the prior close — never implies a stale price is live. Resolve a name to a symbol with `finnhub_search_symbols` first. | `symbol` | `readOnlyHint`, `openWorldHint` |
 | `finnhub_get_company` | Full company context for one US symbol in a single call: profile (name, exchange, industry, country, market cap, shares outstanding, IPO date, website, logo), headline fundamentals (P/E, EPS, 52-week range, beta, dividend yield, margins, growth), and sector peers. Combines three endpoints so "tell me about Apple" needs one tool call, not three. | `symbol` | `readOnlyHint`, `openWorldHint` |
 | `finnhub_get_earnings` | Earnings data in two modes. `history`: a symbol's past quarters — actual vs. estimate EPS, surprise %, period (the surprise is the market-moving signal, surfaced prominently). `calendar`: upcoming releases across the market in a date window — date, EPS/revenue estimates, symbol. `history` requires `symbol`; `calendar` uses `from`/`to`. | `mode`, `symbol?`, `from?`, `to?` | `readOnlyHint`, `openWorldHint` |
@@ -166,11 +166,13 @@ Notation: input/output are Zod sketches; every field carries a `.describe()` in 
 
 ```ts
 input: z.object({
-  query: z.string().min(1).describe(
-    'Company name (e.g., "Apple"), partial name ("micro"), or ticker fragment. Finnhub full-text matches across symbols and descriptions. Use this first when you have a company name, not a ticker — the rest of the tools need a symbol.',
+  query: z.string().min(1).max(20, {
+    message: 'Finnhub search queries are limited to 20 characters. Use a shorter company name or ticker fragment.',
+  }).describe(
+    'Company name (e.g., "Apple"), partial name ("micro"), or ticker fragment, up to 20 characters. Finnhub full-text matches across symbols and descriptions. Use this first when you have a company name, not a ticker — the rest of the tools need a symbol.',
   ),
   limit: z.number().int().min(1).max(50).default(10).describe(
-    'Max symbols to return (Finnhub often returns 10–50 matches for a common word). Default 10. US Common Stock matches are surfaced first.',
+    'Max symbols to return (Finnhub often returns 10–50 matches for a common word). Default 10. Likely-US Common Stock matches are surfaced first.',
   ),
 }),
 
@@ -180,8 +182,8 @@ output: z.object({
     displaySymbol: z.string().describe('Human-facing ticker as shown on its exchange (e.g., "AAPL", "603020.SS").'),
     description: z.string().describe('Company / security name.'),
     type: z.string().describe('Security type (e.g., "Common Stock", "ETP", "ETF"). Empty string when Finnhub omits it.'),
-    isLikelyUS: z.boolean().describe('Heuristic: symbol has no exchange suffix (no dot) — i.e., a plain US ticker reachable on the free tier. Suffixed symbols (".SS", ".T", ".L") are international and 403 on quote/profile.'),
-  })).describe('Matched symbols, US Common Stock first, then by Finnhub order.'),
+    isLikelyUS: z.boolean().describe('Symbol-format heuristic for likely US free-tier availability. Plain tickers and `.A`/`.B` class-share symbols are likely US; recognized exchange suffixes such as `.SS`, `.T`, and `.L` are not. Quote and profile responses remain authoritative.'),
+  })).describe('Matched symbols, likely-US Common Stock first, then by Finnhub order.'),
 }),
 
 enrichment: {
@@ -192,14 +194,14 @@ enrichment: {
 
 **Handler flow:**
 1. `service.search(input.query)` → `{ count, result[] }`.
-2. Map each `result` to the output object. Compute `isLikelyUS = !symbol.includes('.')` — surfaced so the agent can avoid burning a `not_us_or_paid` 403 on a suffixed symbol. (Honest signal, not a fabricated score: the dot-suffix → non-US mapping is how Finnhub namespaces exchanges.)
-3. Stable sort: US Common Stock (`isLikelyUS && type === 'Common Stock'`) first, preserving Finnhub order within groups.
+2. Map each `result` to the output object. Compute `isLikelyUS` from a symbol-format heuristic: plain symbols and alphabetic `.A`/`.B` class shares are likely US; other dotted symbols are not. The flag guides ranking but does not guarantee endpoint availability.
+3. Stable sort: likely-US Common Stock (`isLikelyUS && type === 'Common Stock'`) first, preserving Finnhub order within groups. ETFs and ETPs keep Finnhub's rank.
 4. `ctx.enrich.total(count)`. If `count === 0`, `ctx.enrich.notice('No symbols matched "<query>". Try the company's common name or a ticker fragment.')`.
 5. Slice to `limit` and return.
 
 **Capped-list disclosure:** `totalCount` (required enrichment) satisfies the rule; when `count > limit` also call `ctx.enrich.truncated({ shown: limit, cap: limit })` so the agent knows more exist. `truncated`/`shown`/`cap` are **optional** in the enrichment extension.
 
-`format()`: a markdown list — `**AAPL** — Apple Inc (Common Stock, US)` per row, with the total and any notice in the enrichment trailer.
+`format()`: a markdown list — `**AAPL** — Apple Inc (Common Stock, likely US (symbol heuristic))` per row, with the total and any notice in the enrichment trailer.
 
 ### 2. `finnhub_get_quote`
 
@@ -540,7 +542,7 @@ The fan-out is why the per-company call costs 3 of the 60/min budget — fine fo
 
 **Unknown-symbol detection is payload-shape, not HTTP status.** Verified: a bogus ticker returns `{c:0,...,t:0}` at **HTTP 200**, and `/stock/profile2` returns `{}`. So `symbol_not_found` is detected by the all-zero quote / empty profile sentinels per-tool, while `not_us_or_paid` is the 403 classified in the service. Two distinct not-available cases, two distinct codes (`NotFound` vs `Forbidden`) — the agent needs to tell "no such US ticker" from "that's an international symbol you can't reach here".
 
-**International-symbol error is the generic 403, surfaced as `not_us_or_paid`.** Probe confirmed `SHOP.TO` and `SAP.DE` return the *same* 403 as paywalled endpoints — Finnhub doesn't distinguish "international" from "paid feature" at the wire. So one `Forbidden` reason covers both, with a recovery hint that names the real fix (use the US listing / a paid plan). `finnhub_search_symbols` exposes `isLikelyUS` (dot-suffix heuristic) so an agent can avoid the 403 before spending a call.
+**International-symbol error is the generic 403, surfaced as `not_us_or_paid`.** Probe confirmed `SHOP.TO` and `SAP.DE` return the *same* 403 as paywalled endpoints — Finnhub doesn't distinguish "international" from "paid feature" at the wire. So one `Forbidden` reason covers both, with a recovery hint that names the real fix (use the US listing / a paid plan). `finnhub_search_symbols` exposes `isLikelyUS` as a ranking heuristic: plain tickers and `.A`/`.B` class shares are likely US, while recognized exchange suffixes are not. Endpoint responses remain authoritative.
 
 **Mode consolidation on earnings and news.** Both nouns have two natural angles (history/calendar, company/market) sharing most of the response shape and all of the service wiring. One tool with a `mode` enum tightens the surface from four tools to two without diverging error semantics (the only mode-specific error is `missing_symbol`, declared once per tool). Quote/company/recommendations stay single-purpose — no second mode earns its place.
 

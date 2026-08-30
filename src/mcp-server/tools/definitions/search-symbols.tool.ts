@@ -8,16 +8,23 @@
 import { tool, z } from '@cyanheads/mcp-ts-core';
 import { getFinnhubService } from '@/services/finnhub/finnhub-service.js';
 
+/** Finnhub uses `.A` and `.B` for US class-share symbols as well as dots for exchanges. */
+const US_CLASS_SHARE_SYMBOL = /^[A-Z]+\.[AB]$/;
+
 export const searchSymbols = tool('finnhub_search_symbols', {
   description:
-    'Resolve a company name or partial ticker to Finnhub stock symbols. The entry point for every other tool — users say "Microsoft", the rest of the surface needs "MSFT". Returns matched symbols with display symbol, description, and security type, best US match first. Each result carries isLikelyUS so an agent can avoid spending a call on an international symbol the free tier cannot reach.',
+    'Resolve a company name or partial ticker to Finnhub stock symbols. The entry point for every other tool — users say "Microsoft", the rest of the surface needs "MSFT". Returns matched symbols with display symbol, description, and security type, best likely-US match first. Each result carries isLikelyUS, a symbol-format heuristic for likely free-tier availability; quote and profile responses remain authoritative.',
   annotations: { readOnlyHint: true, openWorldHint: true },
   input: z.object({
     query: z
       .string()
       .min(1)
+      .max(20, {
+        message:
+          'Finnhub search queries are limited to 20 characters. Use a shorter company name or ticker fragment.',
+      })
       .describe(
-        'Company name (e.g., "Apple"), partial name ("micro"), or ticker fragment. Finnhub full-text matches across symbols and descriptions. Use this first when you have a company name, not a ticker — the rest of the tools need a symbol.',
+        'Company name (e.g., "Apple"), partial name ("micro"), or ticker fragment, up to 20 characters. Finnhub full-text matches across symbols and descriptions. Use this first when you have a company name, not a ticker — the rest of the tools need a symbol.',
       ),
     limit: z
       .number()
@@ -26,7 +33,7 @@ export const searchSymbols = tool('finnhub_search_symbols', {
       .max(50)
       .default(10)
       .describe(
-        'Max symbols to return (Finnhub often returns 10–50 matches for a common word). Default 10. US Common Stock matches are surfaced first.',
+        'Max symbols to return (Finnhub often returns 10–50 matches for a common word). Default 10. Likely-US Common Stock matches are surfaced first.',
       ),
   }),
   output: z.object({
@@ -53,12 +60,12 @@ export const searchSymbols = tool('finnhub_search_symbols', {
             isLikelyUS: z
               .boolean()
               .describe(
-                'Heuristic: symbol has no exchange suffix (no dot) — i.e., a plain US ticker reachable on the free tier. Suffixed symbols (".SS", ".T", ".L") are international and 403 on quote/profile.',
+                'Symbol-format heuristic for likely US free-tier availability. Plain tickers and `.A`/`.B` class-share symbols are likely US; recognized exchange suffixes such as `.SS`, `.T`, and `.L` are not. Quote and profile responses remain authoritative.',
               ),
           })
           .describe('A single matched symbol.'),
       )
-      .describe('Matched symbols, US Common Stock first, then by Finnhub order.'),
+      .describe('Matched symbols, likely-US Common Stock first, then by Finnhub order.'),
   }),
   enrichment: {
     totalCount: z
@@ -81,13 +88,12 @@ export const searchSymbols = tool('finnhub_search_symbols', {
       displaySymbol: match.displaySymbol,
       description: match.description,
       type: match.type,
-      isLikelyUS: !match.symbol.includes('.'),
+      isLikelyUS: !match.symbol.includes('.') || US_CLASS_SHARE_SYMBOL.test(match.symbol),
     }));
 
     /**
-     * Stable sort: US Common Stock first, preserving Finnhub's order within
-     * each group. The dot-suffix → non-US mapping is how Finnhub namespaces
-     * exchanges (honest signal, not a fabricated score).
+     * Stable sort: likely-US Common Stock first, preserving Finnhub's order
+     * within each group. ETFs and ETPs deliberately retain Finnhub's rank.
      */
     const rank = (r: (typeof mapped)[number]): number =>
       r.isLikelyUS && r.type === 'Common Stock' ? 0 : 1;
@@ -119,7 +125,9 @@ export const searchSymbols = tool('finnhub_search_symbols', {
       return [{ type: 'text', text: 'No matching symbols.' }];
     }
     const lines = result.results.map((r) => {
-      const region = r.isLikelyUS ? 'likely US (free tier)' : 'international';
+      const region = r.isLikelyUS
+        ? 'likely US (symbol heuristic)'
+        : 'not likely US (exchange-suffix heuristic)';
       const type = r.type || 'Unknown type';
       return `**${r.symbol}** — ${r.description} (${type}, ${region}) · display: ${r.displaySymbol}`;
     });

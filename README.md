@@ -7,7 +7,7 @@
 
 <div align="center">
 
-[![Version](https://img.shields.io/badge/Version-0.1.2-blue.svg?style=flat-square)](./CHANGELOG.md) [![License](https://img.shields.io/badge/License-Apache%202.0-orange.svg?style=flat-square)](./LICENSE) [![Docker](https://img.shields.io/badge/Docker-ghcr.io-2496ED?style=flat-square&logo=docker&logoColor=white)](https://github.com/users/cyanheads/packages/container/package/finnhub-mcp-server) [![MCP SDK](https://img.shields.io/badge/MCP%20SDK-2.0.0-green.svg?style=flat-square)](https://modelcontextprotocol.io/) [![npm](https://img.shields.io/npm/v/@cyanheads/finnhub-mcp-server?style=flat-square&logo=npm&logoColor=white)](https://www.npmjs.com/package/@cyanheads/finnhub-mcp-server) [![TypeScript](https://img.shields.io/badge/TypeScript-^7.0.2-3178C6.svg?style=flat-square)](https://www.typescriptlang.org/) [![Bun](https://img.shields.io/badge/Bun-v1.3.0-blueviolet.svg?style=flat-square)](https://bun.sh/)
+[![Version](https://img.shields.io/badge/Version-0.1.3-blue.svg?style=flat-square)](./CHANGELOG.md) [![License](https://img.shields.io/badge/License-Apache%202.0-orange.svg?style=flat-square)](./LICENSE) [![Docker](https://img.shields.io/badge/Docker-ghcr.io-2496ED?style=flat-square&logo=docker&logoColor=white)](https://github.com/users/cyanheads/packages/container/package/finnhub-mcp-server) [![MCP SDK](https://img.shields.io/badge/MCP%20SDK-2.0.0-green.svg?style=flat-square)](https://modelcontextprotocol.io/) [![npm](https://img.shields.io/npm/v/@cyanheads/finnhub-mcp-server?style=flat-square&logo=npm&logoColor=white)](https://www.npmjs.com/package/@cyanheads/finnhub-mcp-server) [![TypeScript](https://img.shields.io/badge/TypeScript-^7.0.2-3178C6.svg?style=flat-square)](https://www.typescriptlang.org/) [![Bun](https://img.shields.io/badge/Bun-v1.3.0-blueviolet.svg?style=flat-square)](https://bun.sh/)
 
 </div>
 
@@ -27,7 +27,7 @@ Six tools, name-first: `finnhub_search_symbols` resolves a company name to a US 
 
 | Tool | Description |
 |:---|:---|
-| `finnhub_search_symbols` | Resolve a company name or partial ticker to US stock symbols, best US match first. The entry point for every other tool. |
+| `finnhub_search_symbols` | Resolve a company name or partial ticker to stock symbols, best likely-US match first. The entry point for every other tool. |
 | `finnhub_get_quote` | Real-time price quote for one US symbol, paired with live market-status so the response states whether the price is live or the prior close. |
 | `finnhub_get_company` | Full company context in one call — profile, headline fundamentals (P/E, EPS, margins, growth), and sector peers. |
 | `finnhub_get_earnings` | Earnings in two modes: a symbol's past quarters with actual-vs-estimate surprises (`history`), or market-wide upcoming releases in a date window (`calendar`). |
@@ -38,8 +38,9 @@ Six tools, name-first: `finnhub_search_symbols` resolves a company name to a US 
 
 Resolve a company name, partial name, or ticker fragment to Finnhub stock symbols. Run this first when you have a name, not a ticker — the rest of the surface needs a symbol.
 
-- Full-text match across symbols and descriptions; US Common Stock matches surfaced first
-- Each result carries `isLikelyUS` (a dot-suffix heuristic — `.SS`, `.T`, `.L` are international) so an agent can avoid spending a call on a symbol the free tier can't reach
+- Full-text match across symbols and descriptions; likely-US Common Stock matches surfaced first
+- `query` accepts 1–20 characters; use a shorter company name or ticker fragment when needed
+- Each result carries `isLikelyUS`, a symbol-format heuristic: plain tickers and `.A`/`.B` class shares are likely US, while exchange suffixes such as `.SS`, `.T`, and `.L` are not. Quote and profile responses remain authoritative
 - `limit` (1–50, default 10); reports the total match count and discloses truncation when more matched than returned
 
 ---
@@ -124,7 +125,7 @@ Agent-friendly output:
 
 - Honest sparsity — every fundamental is nullable and absent values stay null; Finnhub's thinly-covered names are surfaced as-is, never zero-filled or fabricated
 - Two distinct "not available" signals — `symbol_not_found` (unknown US ticker, detected from the all-zero quote / empty profile sentinel) vs. `not_us_or_paid` (international or paid-only, HTTP 403) — so an agent can tell them apart and recover
-- Typed error contracts with recovery hints on every failure, plus `isLikelyUS` on search results so an agent avoids burning a call on an unreachable symbol
+- Typed error contracts with recovery hints on every failure, plus the `isLikelyUS` search heuristic so an agent can prioritize likely free-tier symbols
 - Capped lists report their total count and disclose truncation, so an agent knows when more data exists
 
 ## Getting started
@@ -193,7 +194,7 @@ Or with Docker:
 For Streamable HTTP, set the transport and start the server:
 
 ```sh
-MCP_TRANSPORT_TYPE=http MCP_HTTP_PORT=3010 FINNHUB_API_KEY=... bun run start:http
+MCP_TRANSPORT_TYPE=http MCP_SESSION_MODE=stateless MCP_HTTP_PORT=3010 FINNHUB_API_KEY=... bun run start:http
 # Server listens at http://localhost:3010/mcp
 ```
 
@@ -240,6 +241,7 @@ All configuration is validated at startup via Zod schemas in `src/config/server-
 | `MCP_TRANSPORT_TYPE` | Transport: `stdio` or `http`. | `stdio` |
 | `MCP_HTTP_PORT` | Port for the HTTP server. | `3010` |
 | `MCP_HTTP_ENDPOINT_PATH` | HTTP endpoint path where the MCP server is mounted. | `/mcp` |
+| `MCP_SESSION_MODE` | Session handling: `auto`, `stateful`, or `stateless`. This project's `.env.example` and Docker image explicitly select `stateless`; an explicit environment value takes precedence. When unset, the framework defaults to `auto`, which currently resolves to `stateful`. | `auto` when unset; project example uses `stateless` |
 | `MCP_AUTH_MODE` | Auth mode: `none`, `jwt`, or `oauth`. | `none` |
 | `MCP_LOG_LEVEL` | Log level (RFC 5424: `debug`, `info`, `notice`, `warning`, `error`). | `info` |
 | `STORAGE_PROVIDER_TYPE` | Storage backend: `in-memory`, `filesystem`, `supabase`, `cloudflare-kv/r2/d1`. | `in-memory` |
