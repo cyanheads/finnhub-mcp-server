@@ -7,7 +7,7 @@
 
 <div align="center">
 
-[![Version](https://img.shields.io/badge/Version-0.1.3-blue.svg?style=flat-square)](./CHANGELOG.md) [![License](https://img.shields.io/badge/License-Apache%202.0-orange.svg?style=flat-square)](./LICENSE) [![Docker](https://img.shields.io/badge/Docker-ghcr.io-2496ED?style=flat-square&logo=docker&logoColor=white)](https://github.com/users/cyanheads/packages/container/package/finnhub-mcp-server) [![MCP SDK](https://img.shields.io/badge/MCP%20SDK-2.0.0-green.svg?style=flat-square)](https://modelcontextprotocol.io/) [![npm](https://img.shields.io/npm/v/@cyanheads/finnhub-mcp-server?style=flat-square&logo=npm&logoColor=white)](https://www.npmjs.com/package/@cyanheads/finnhub-mcp-server) [![TypeScript](https://img.shields.io/badge/TypeScript-^7.0.2-3178C6.svg?style=flat-square)](https://www.typescriptlang.org/) [![Bun](https://img.shields.io/badge/Bun-v1.3.0-blueviolet.svg?style=flat-square)](https://bun.sh/)
+[![Version](https://img.shields.io/badge/Version-0.1.4-blue.svg?style=flat-square)](./CHANGELOG.md) [![License](https://img.shields.io/badge/License-Apache%202.0-orange.svg?style=flat-square)](./LICENSE) [![Docker](https://img.shields.io/badge/Docker-ghcr.io-2496ED?style=flat-square&logo=docker&logoColor=white)](https://github.com/users/cyanheads/packages/container/package/finnhub-mcp-server) [![MCP SDK](https://img.shields.io/badge/MCP%20SDK-2.0.0-green.svg?style=flat-square)](https://modelcontextprotocol.io/) [![npm](https://img.shields.io/npm/v/@cyanheads/finnhub-mcp-server?style=flat-square&logo=npm&logoColor=white)](https://www.npmjs.com/package/@cyanheads/finnhub-mcp-server) [![TypeScript](https://img.shields.io/badge/TypeScript-^7.0.2-3178C6.svg?style=flat-square)](https://www.typescriptlang.org/) [![Bun](https://img.shields.io/badge/Bun-v1.3.0-blueviolet.svg?style=flat-square)](https://bun.sh/)
 
 </div>
 
@@ -28,9 +28,9 @@ Six tools, name-first: `finnhub_search_symbols` resolves a company name to a US 
 | Tool | Description |
 |:---|:---|
 | `finnhub_search_symbols` | Resolve a company name or partial ticker to stock symbols, best likely-US match first. The entry point for every other tool. |
-| `finnhub_get_quote` | Real-time price quote for one US symbol, paired with live market-status so the response states whether the price is live or the prior close. |
+| `finnhub_get_quote` | Real-time price quote for one US symbol, paired with live market-status so the response states whether the price is live or the prior close, including the returned session and named holiday. |
 | `finnhub_get_company` | Full company context in one call — profile, headline fundamentals (P/E, EPS, margins, growth), and sector peers. |
-| `finnhub_get_earnings` | Earnings in two modes: a symbol's past quarters with actual-vs-estimate surprises (`history`), or market-wide upcoming releases in a date window (`calendar`). |
+| `finnhub_get_earnings` | Earnings in two modes: a symbol's past quarters with actual-vs-estimate surprises (`history`), or upcoming releases in a date window with an optional symbol filter (`calendar`). |
 | `finnhub_get_news` | Financial news in two modes: recent articles for one symbol over a date range (`company`), or broad market headlines by category (`market`). |
 | `finnhub_get_recommendations` | Analyst recommendation trends for one US symbol — strong-buy / buy / hold / sell / strong-sell counts per month, newest first. |
 
@@ -51,7 +51,8 @@ Real-time price quote for one US symbol. The market-hours flag is the point — 
 
 - Current price, absolute and percent change, session open/high/low, previous close, and an ISO 8601 quote time
 - Pairs `/quote` with `/stock/market-status` (parallel fan-out) to derive `priceIsLive` — `true` only when the US market is open; when closed, `current` is the prior close, surfaced as such
-- Market-status failing degrades to `marketOpen: null` rather than tanking the quote
+- Exposes Finnhub's nullable `session` (`pre-market`, `regular`, or `post-market`) and returned holiday event name without inferring either value
+- Market-status failing degrades to `marketOpen: null`, `session: null`, and `holiday: null` rather than tanking the quote
 - Unknown US ticker → `symbol_not_found`; international or paid-only symbol → `not_us_or_paid`
 
 ---
@@ -72,7 +73,7 @@ Full company context for one US symbol in a single call — profile is hollow wi
 Earnings data for one symbol or across the market, selected by `mode`.
 
 - `history` (requires `symbol`): past quarters — actual vs. estimate EPS, absolute surprise, and surprise % (the market-moving signal), newest first
-- `calendar` (uses `from` / `to`, defaults to today through +14 days): upcoming releases across the market — date, EPS/revenue estimates, expected report time
+- `calendar` (uses `from` / `to`, defaults to today through +14 days; optional `symbol` filter): upcoming releases across the market or for one symbol — date, EPS/revenue estimates, expected report time
 - `limit` (1–100, default 50); reports total rows and discloses truncation
 
 ---
@@ -83,7 +84,7 @@ Financial news for one company or the broad market, selected by `mode`.
 
 - `company` (requires `symbol`): recent articles over a date range (defaults to the last 7 days) — headline, source, ISO 8601 datetime, summary, URL
 - `market` (uses `category`): broad headlines by `general`, `forex`, `crypto`, or `merger` (see the `finnhub://news-categories` resource)
-- `limit` (1–50, default 15 — news lists run long); articles newest first, with total and truncation disclosure
+- `limit` (1–100, default 15 — news lists run long); articles newest first, with total and truncation disclosure
 
 ---
 
