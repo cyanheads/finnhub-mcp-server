@@ -1,8 +1,8 @@
 /**
  * @fileoverview finnhub_get_earnings — earnings in two modes. `history`: a
  * symbol's past quarters with actual-vs-estimate surprises. `calendar`:
- * market-wide upcoming releases in a date window. Mode-consolidated because both
- * are the same noun (earnings) from two angles.
+ * upcoming releases in a date window, optionally filtered by symbol.
+ * Mode-consolidated because both are the same noun (earnings) from two angles.
  * @module mcp-server/tools/definitions/get-earnings.tool
  */
 
@@ -17,19 +17,19 @@ function isoDate(date: Date): string {
 
 export const getEarnings = tool('finnhub_get_earnings', {
   description:
-    "Earnings data in two modes. 'history': a symbol's past quarters — actual vs. estimate EPS, surprise %, period (the surprise is the market-moving signal, surfaced prominently); requires `symbol`. 'calendar': upcoming releases across the market in a date window — date, EPS/revenue estimates, symbol; uses `from`/`to`. Resolve a company name with finnhub_search_symbols first for history mode.",
+    "Earnings data in two modes. 'history': a symbol's past quarters — actual vs. estimate EPS, surprise %, period (the surprise is the market-moving signal, surfaced prominently); requires `symbol`. 'calendar': upcoming releases in a date window — date, EPS/revenue estimates, symbol; uses `from`/`to` and optionally filters by `symbol`. Resolve a company name with finnhub_search_symbols first.",
   annotations: { readOnlyHint: true, openWorldHint: true },
   input: z.object({
     mode: z
       .enum(['history', 'calendar'])
       .describe(
-        "'history' = one symbol's past quarters with actual-vs-estimate surprises (requires `symbol`). 'calendar' = market-wide upcoming releases in a date window (uses `from`/`to`).",
+        "'history' = one symbol's past quarters with actual-vs-estimate surprises (requires `symbol`). 'calendar' = upcoming releases in a date window, optionally filtered by `symbol` (uses `from`/`to`).",
       ),
     symbol: z
       .string()
       .optional()
       .describe(
-        'Required for `history`. US ticker. Resolve a name with finnhub_search_symbols first. Ignored in `calendar` mode.',
+        'Required for `history`; optionally filters `calendar` mode. US ticker. Resolve a name with finnhub_search_symbols first.',
       ),
     from: z
       .string()
@@ -179,8 +179,22 @@ export const getEarnings = tool('finnhub_get_earnings', {
     const today = new Date();
     const from = input.from || isoDate(today);
     const to = input.to || isoDate(new Date(today.getTime() + 14 * 86_400_000));
+    const symbol = input.symbol || undefined;
 
-    const { earningsCalendar } = await service.earningsCalendar(from, to, ctx);
+    let raw: Awaited<ReturnType<typeof service.earningsCalendar>>;
+    try {
+      raw = await service.earningsCalendar(from, to, symbol, ctx);
+    } catch (err) {
+      if (symbol && err instanceof McpError && err.code === JsonRpcErrorCode.Forbidden) {
+        throw ctx.fail('not_us_or_paid', undefined, {
+          symbol,
+          ...ctx.recoveryFor('not_us_or_paid'),
+        });
+      }
+      throw err;
+    }
+
+    const { earningsCalendar } = raw;
     const calendar = earningsCalendar
       .map((e) => ({
         symbol: e.symbol,
@@ -195,7 +209,11 @@ export const getEarnings = tool('finnhub_get_earnings', {
 
     ctx.enrich.total(calendar.length);
     if (calendar.length === 0) {
-      ctx.enrich.notice(`No earnings releases between ${from} and ${to}. Widen the date window.`);
+      ctx.enrich.notice(
+        symbol
+          ? `No earnings releases for "${symbol}" between ${from} and ${to}. Widen the date window.`
+          : `No earnings releases between ${from} and ${to}. Widen the date window.`,
+      );
     }
     const sliced = calendar.slice(0, input.limit);
     if (calendar.length > input.limit) {

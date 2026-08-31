@@ -95,11 +95,16 @@ export class FinnhubService {
     return this.request<FinnhubEarning[]>('/stock/earnings', { symbol }, 'earnings', ctx);
   }
 
-  /** `GET /calendar/earnings?from={from}&to={to}` — upcoming releases window. */
-  earningsCalendar(from: string, to: string, ctx: Context): Promise<FinnhubEarningsCalendar> {
+  /** `GET /calendar/earnings?from={from}&to={to}&symbol={symbol?}` — upcoming releases window. */
+  earningsCalendar(
+    from: string,
+    to: string,
+    symbol: string | undefined,
+    ctx: Context,
+  ): Promise<FinnhubEarningsCalendar> {
     return this.request<FinnhubEarningsCalendar>(
       '/calendar/earnings',
-      { from, to },
+      symbol === undefined ? { from, to } : { from, to, symbol },
       'earningsCalendar',
       ctx,
     );

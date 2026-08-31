@@ -136,4 +136,29 @@ describe('FinnhubService', () => {
     const out = await service.quote('ZZZZBOGUS', ctx);
     expect(out).toEqual(sentinel);
   });
+
+  it('builds the existing market-wide earnings-calendar URL without a symbol key', async () => {
+    fetchWithTimeoutMock.mockResolvedValue(okResponse({ earningsCalendar: [] }));
+    const service = new FinnhubService();
+    const ctx = createMockContext();
+
+    await service.earningsCalendar('2026-06-13', '2026-06-27', undefined, ctx);
+
+    const calledUrl = new URL(String(fetchWithTimeoutMock.mock.calls[0]?.[0]));
+    expect(calledUrl.pathname).toBe('/api/v1/calendar/earnings');
+    expect(calledUrl.searchParams.get('from')).toBe('2026-06-13');
+    expect(calledUrl.searchParams.get('to')).toBe('2026-06-27');
+    expect(calledUrl.searchParams.has('symbol')).toBe(false);
+  });
+
+  it('adds a supplied symbol to the earnings-calendar URL', async () => {
+    fetchWithTimeoutMock.mockResolvedValue(okResponse({ earningsCalendar: [] }));
+    const service = new FinnhubService();
+    const ctx = createMockContext();
+
+    await service.earningsCalendar('2026-07-01', '2026-08-01', 'AAPL', ctx);
+
+    const calledUrl = new URL(String(fetchWithTimeoutMock.mock.calls[0]?.[0]));
+    expect(calledUrl.searchParams.get('symbol')).toBe('AAPL');
+  });
 });
