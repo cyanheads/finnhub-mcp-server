@@ -2,6 +2,10 @@
 
 All notable changes to this project. Each entry links to its full per-version file in [changelog/](changelog/).
 
+## [0.1.4](changelog/0.1.x/0.1.4.md) — 2026-08-30
+
+Quotes now expose Finnhub session and holiday status; earnings calendars can filter by symbol, and news can return up to 100 fetched articles.
+
 ## [0.1.3](changelog/0.1.x/0.1.3.md) — 2026-08-30
 
 Search now identifies US class-share symbols and rejects overlong queries before calling Finnhub; configuration examples explicitly choose stateless HTTP sessions.
