@@ -50,7 +50,7 @@ export interface FinnhubMarketStatus {
   exchange: string;
   holiday: string | null;
   isOpen: boolean;
-  session: string | null;
+  session: 'pre-market' | 'regular' | 'post-market' | null;
   t: number;
   timezone: string;
 }

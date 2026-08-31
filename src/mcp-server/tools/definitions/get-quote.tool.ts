@@ -48,6 +48,16 @@ export const getQuote = tool('finnhub_get_quote', {
       .describe(
         'Whether the US market is currently open. Null when the market-status check failed.',
       ),
+    session: z
+      .enum(['pre-market', 'regular', 'post-market'])
+      .nullable()
+      .describe(
+        'Finnhub market session. Null when Finnhub reports no active session or status is unavailable.',
+      ),
+    holiday: z
+      .string()
+      .nullable()
+      .describe('Finnhub holiday event name. Null when none is reported or status is unavailable.'),
     priceIsLive: z
       .boolean()
       .describe(
@@ -103,6 +113,8 @@ export const getQuote = tool('finnhub_get_quote', {
     }
 
     const marketOpen = statusResult.status === 'fulfilled' ? statusResult.value.isOpen : null;
+    const session = statusResult.status === 'fulfilled' ? statusResult.value.session : null;
+    const holiday = statusResult.status === 'fulfilled' ? statusResult.value.holiday : null;
     const priceIsLive = marketOpen === true;
 
     if (statusResult.status === 'rejected') {
@@ -122,6 +134,8 @@ export const getQuote = tool('finnhub_get_quote', {
       previousClose: quote.pc,
       quoteTime: new Date(quote.t * 1000).toISOString(),
       marketOpen,
+      session,
+      holiday,
       priceIsLive,
     };
   },
@@ -143,9 +157,11 @@ export const getQuote = tool('finnhub_get_quote', {
     const freshness =
       result.marketOpen == null
         ? 'freshness unknown'
-        : result.priceIsLive
-          ? 'live'
-          : 'prior close — market closed';
+        : result.session
+          ? `${result.session} — ${result.priceIsLive ? 'live' : 'prior close'}`
+          : result.priceIsLive
+            ? 'live'
+            : 'prior close — market closed';
 
     const lines = [
       `**${result.symbol}** $${result.current} ${arrow} ${pct} (${freshness})`,
@@ -154,6 +170,8 @@ export const getQuote = tool('finnhub_get_quote', {
         result.marketOpen == null ? '' : ` | Market open: ${result.marketOpen ? 'yes' : 'no'}`
       }`,
     ];
+    if (result.session !== null) lines.push(`Market session: ${result.session}`);
+    if (result.holiday !== null) lines.push(`Holiday: ${result.holiday}`);
     return [{ type: 'text', text: lines.join('\n') }];
   },
 });
