@@ -63,9 +63,9 @@ export const getNews = tool('finnhub_get_news', {
       .number()
       .int()
       .min(1)
-      .max(50)
+      .max(100)
       .default(15)
-      .describe('Max articles. Default 15 — news lists run long; keep context lean.'),
+      .describe('Max articles (1–100). Default 15 — news lists run long; keep context lean.'),
   }),
   output: z.object({
     mode: z.enum(['company', 'market']).describe('The mode used (echo of input).'),

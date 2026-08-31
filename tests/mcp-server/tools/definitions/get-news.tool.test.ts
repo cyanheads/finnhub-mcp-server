@@ -114,6 +114,87 @@ describe('getNews', () => {
     expect(getEnrichment(ctx).notice).toContain('crypto');
   });
 
+  it('defaults to 15 articles and preserves total/truncation enrichment', async () => {
+    mockService({
+      marketNews: () =>
+        Array.from({ length: 16 }, (_, index) => ({
+          datetime: 1_780_000_000 + index,
+          headline: `Headline ${index + 1}`,
+          source: 'Reuters',
+          summary: '',
+          url: `https://example.com/${index + 1}`,
+        })),
+    });
+    const ctx = createMockContext({ errors: getNews.errors });
+
+    const result = await getNews.handler(getNews.input.parse({ mode: 'market' }), ctx);
+
+    expect(result.articles).toHaveLength(15);
+    expect(getEnrichment(ctx)).toMatchObject({
+      totalCount: 16,
+      truncated: true,
+      shown: 15,
+      cap: 15,
+    });
+  });
+
+  it('returns and formats all 100 articles at the shared cap', async () => {
+    mockService({
+      marketNews: () =>
+        Array.from({ length: 100 }, (_, index) => ({
+          datetime: 1_780_000_000 + index,
+          headline: `Headline ${index + 1}`,
+          source: 'Reuters',
+          summary: `Summary ${index + 1}`,
+          url: `https://example.com/${index + 1}`,
+        })),
+    });
+    const ctx = createMockContext({ errors: getNews.errors });
+
+    const result = await getNews.handler(
+      getNews.input.parse({ mode: 'market', category: 'general', limit: 100 }),
+      ctx,
+    );
+
+    expect(result.articles).toHaveLength(100);
+    expect(getEnrichment(ctx)).toEqual({ totalCount: 100 });
+    const last = result.articles.at(-1);
+    expect(last).toBeDefined();
+    const text = getNews.format!(result)
+      .map((block) => (block.type === 'text' ? block.text : ''))
+      .join('');
+    expect(text).toContain(last?.headline);
+    expect(text).toContain(last?.url);
+  });
+
+  it('preserves truncation metadata for a smaller explicit limit', async () => {
+    mockService({
+      marketNews: () =>
+        Array.from({ length: 3 }, (_, index) => ({
+          datetime: 1_780_000_000 + index,
+          headline: `Headline ${index + 1}`,
+          source: 'Reuters',
+          summary: '',
+          url: `https://example.com/${index + 1}`,
+        })),
+    });
+    const ctx = createMockContext({ errors: getNews.errors });
+
+    const result = await getNews.handler(getNews.input.parse({ mode: 'market', limit: 2 }), ctx);
+
+    expect(result.articles).toHaveLength(2);
+    expect(getEnrichment(ctx)).toMatchObject({
+      totalCount: 3,
+      truncated: true,
+      shown: 2,
+      cap: 2,
+    });
+  });
+
+  it('rejects a limit above the shared 100-article cap', () => {
+    expect(() => getNews.input.parse({ mode: 'market', limit: 101 })).toThrow();
+  });
+
   it('format() renders the headline, source, and URL', () => {
     const blocks = getNews.format!({
       mode: 'company',
