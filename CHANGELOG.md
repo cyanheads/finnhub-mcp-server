@@ -2,6 +2,10 @@
 
 All notable changes to this project. Each entry links to its full per-version file in [changelog/](changelog/).
 
+## [0.1.5](changelog/0.1.x/0.1.5.md) — 2026-09-20
+
+HTTP sessions default to stateless via a source-level declaration when MCP_SESSION_MODE is unset; Claude Code and Codex plugin installs now deliver FINNHUB_API_KEY instead of a placeholder; mcp-ts-core bumped to ^0.13.6.
+
 ## [0.1.4](changelog/0.1.x/0.1.4.md) — 2026-08-30
 
 Quotes now expose Finnhub session and holiday status; earnings calendars can filter by symbol, and news can return up to 100 fetched articles.
