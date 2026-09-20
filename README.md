@@ -7,7 +7,7 @@
 
 <div align="center">
 
-[![Version](https://img.shields.io/badge/Version-0.1.4-blue.svg?style=flat-square)](./CHANGELOG.md) [![License](https://img.shields.io/badge/License-Apache%202.0-orange.svg?style=flat-square)](./LICENSE) [![Docker](https://img.shields.io/badge/Docker-ghcr.io-2496ED?style=flat-square&logo=docker&logoColor=white)](https://github.com/users/cyanheads/packages/container/package/finnhub-mcp-server) [![MCP SDK](https://img.shields.io/badge/MCP%20SDK-2.0.0-green.svg?style=flat-square)](https://modelcontextprotocol.io/) [![npm](https://img.shields.io/npm/v/@cyanheads/finnhub-mcp-server?style=flat-square&logo=npm&logoColor=white)](https://www.npmjs.com/package/@cyanheads/finnhub-mcp-server) [![TypeScript](https://img.shields.io/badge/TypeScript-^7.0.2-3178C6.svg?style=flat-square)](https://www.typescriptlang.org/) [![Bun](https://img.shields.io/badge/Bun-v1.3.0-blueviolet.svg?style=flat-square)](https://bun.sh/)
+[![Version](https://img.shields.io/badge/Version-0.1.4-blue.svg?style=flat-square)](./CHANGELOG.md) [![License](https://img.shields.io/badge/License-Apache%202.0-orange.svg?style=flat-square)](./LICENSE) [![Docker](https://img.shields.io/badge/Docker-ghcr.io-2496ED?style=flat-square&logo=docker&logoColor=white)](https://github.com/users/cyanheads/packages/container/package/finnhub-mcp-server) [![MCP SDK](https://img.shields.io/badge/MCP%20SDK-^2.0.0-green.svg?style=flat-square)](https://modelcontextprotocol.io/) [![npm](https://img.shields.io/npm/v/@cyanheads/finnhub-mcp-server?style=flat-square&logo=npm&logoColor=white)](https://www.npmjs.com/package/@cyanheads/finnhub-mcp-server) [![TypeScript](https://img.shields.io/badge/TypeScript-^7.0.2-3178C6.svg?style=flat-square)](https://www.typescriptlang.org/) [![Bun](https://img.shields.io/badge/Bun-v1.4.0-blueviolet.svg?style=flat-square)](https://bun.sh/)
 
 </div>
 
@@ -21,9 +21,11 @@
 
 ---
 
-## Tools
+## Overview
 
-Six tools, name-first: `finnhub_search_symbols` resolves a company name to a US ticker, then the other five work from that symbol — a live quote, full company context, earnings, news, and analyst consensus.
+Real-time US-equity data from Finnhub — quotes, company fundamentals, earnings, analyst recommendations, and financial news. Resolve a company name to a symbol with `finnhub_search_symbols`, then pull live pricing, valuation, or news for it from any MCP client. Runs as a stdio process or a local Streamable HTTP server.
+
+### Tools
 
 | Tool | Description |
 |:---|:---|
@@ -34,9 +36,17 @@ Six tools, name-first: `finnhub_search_symbols` resolves a company name to a US 
 | `finnhub_get_news` | Financial news in two modes: recent articles for one symbol over a date range (`company`), or broad market headlines by category (`market`). |
 | `finnhub_get_recommendations` | Analyst recommendation trends for one US symbol — strong-buy / buy / hold / sell / strong-sell counts per month, newest first. |
 
-### `finnhub_search_symbols`
+### Resources
 
-Resolve a company name, partial name, or ticker fragment to Finnhub stock symbols. Run this first when you have a name, not a ticker — the rest of the surface needs a symbol.
+| Resource | Description |
+|:---|:---|
+| `finnhub://news-categories` | The four valid market-news categories (`general`, `forex`, `crypto`, `merger`) with one-line descriptions. |
+
+Fully covered by the `category` enum on `finnhub_get_news`, so tool-only clients lose nothing.
+
+## Capability reference
+
+### `finnhub_search_symbols` <sub>tool</sub>
 
 - Full-text match across symbols and descriptions; likely-US Common Stock matches surfaced first
 - `query` accepts 1–20 characters; use a shorter company name or ticker fragment when needed
@@ -45,9 +55,7 @@ Resolve a company name, partial name, or ticker fragment to Finnhub stock symbol
 
 ---
 
-### `finnhub_get_quote`
-
-Real-time price quote for one US symbol. The market-hours flag is the point — the response never presents a stale price as live.
+### `finnhub_get_quote` <sub>tool</sub>
 
 - Current price, absolute and percent change, session open/high/low, previous close, and an ISO 8601 quote time
 - Pairs `/quote` with `/stock/market-status` (parallel fan-out) to derive `priceIsLive` — `true` only when the US market is open; when closed, `current` is the prior close, surfaced as such
@@ -57,9 +65,7 @@ Real-time price quote for one US symbol. The market-hours flag is the point — 
 
 ---
 
-### `finnhub_get_company`
-
-Full company context for one US symbol in a single call — profile is hollow without the valuation numbers, so this is deliberately one tool over three.
+### `finnhub_get_company` <sub>tool</sub>
 
 - Profile: name, exchange, industry, country, currency, market cap, shares outstanding, IPO date, website, logo
 - Headline fundamentals: P/E (TTM), EPS (TTM), 52-week range, beta, dividend yield, net/gross margin, revenue growth YoY, ROE — every field nullable, surfaced honestly for thinly-covered names rather than zero-filled
@@ -68,52 +74,41 @@ Full company context for one US symbol in a single call — profile is hollow wi
 
 ---
 
-### `finnhub_get_earnings`
-
-Earnings data for one symbol or across the market, selected by `mode`.
+### `finnhub_get_earnings` <sub>tool</sub>
 
 - `history` (requires `symbol`): past quarters — actual vs. estimate EPS, absolute surprise, and surprise % (the market-moving signal), newest first
 - `calendar` (uses `from` / `to`, defaults to today through +14 days; optional `symbol` filter): upcoming releases across the market or for one symbol — date, EPS/revenue estimates, expected report time
 - `limit` (1–100, default 50); reports total rows and discloses truncation
+- `history` without `symbol` → `missing_symbol`; international or paid-only symbol → `not_us_or_paid`
 
 ---
 
-### `finnhub_get_news`
-
-Financial news for one company or the broad market, selected by `mode`.
+### `finnhub_get_news` <sub>tool</sub>
 
 - `company` (requires `symbol`): recent articles over a date range (defaults to the last 7 days) — headline, source, ISO 8601 datetime, summary, URL
 - `market` (uses `category`): broad headlines by `general`, `forex`, `crypto`, or `merger` (see the `finnhub://news-categories` resource)
 - `limit` (1–100, default 15 — news lists run long); articles newest first, with total and truncation disclosure
+- `company` without `symbol` → `missing_symbol`; international or paid-only symbol → `not_us_or_paid`
 
 ---
 
-### `finnhub_get_recommendations`
-
-Analyst recommendation consensus for one US symbol — the view to pair with the live quote and fundamentals.
+### `finnhub_get_recommendations` <sub>tool</sub>
 
 - Per-month strong-buy / buy / hold / sell / strong-sell counts, newest first (typically 12–24 months of history)
 - `limit` (1–24, default 12 — one year); reports total months and discloses truncation
-- Empty result (no analyst coverage) → `no_coverage`, distinct from an invalid symbol
+- Empty result (no analyst coverage) → `no_coverage`, distinct from an invalid symbol; international or paid-only symbol → `not_us_or_paid`
 
-## Resource
+---
 
-| Type | Name | Description |
-|:---|:---|:---|
-| Resource | `finnhub://news-categories` | The four valid market-news categories (`general`, `forex`, `crypto`, `merger`) with one-line descriptions. |
+### `finnhub://news-categories` <sub>resource</sub>
 
-The resource is a convenience mirror — its data is fully covered by the `category` enum on `finnhub_get_news`, so tool-only clients lose nothing. Live data (quotes, news, earnings) is intentionally not exposed as a resource: it's time-sensitive, and the value is in the freshness, so it's reachable only through the tools.
+- Returns the four valid `finnhub_get_news` market-mode categories (`general`, `forex`, `crypto`, `merger`) with one-line descriptions, as `application/json`
+- Convenience mirror — fully covered by the `category` enum's `.describe()` on `finnhub_get_news`, so tool-only clients lose nothing
+- Live data (quotes, news, earnings) is intentionally not exposed as a resource — it's time-sensitive, so freshness lives only in the tools
 
 ## Features
 
-Built on [`@cyanheads/mcp-ts-core`](https://www.npmjs.com/package/@cyanheads/mcp-ts-core):
-
-- Declarative tool and resource definitions — single file per primitive, framework handles registration and validation
-- Unified error handling — handlers throw, framework catches, classifies, and formats
-- Pluggable auth: `none`, `jwt`, `oauth`
-- Swappable storage backends: `in-memory`, `filesystem`, `Supabase`, `Cloudflare KV/R2/D1`
-- Structured logging with optional OpenTelemetry tracing
-- STDIO and Streamable HTTP transports
+Built on [`@cyanheads/mcp-ts-core`](https://github.com/cyanheads/mcp-ts-core): stdio and Streamable HTTP transports, pluggable auth (`none` / `jwt` / `oauth`), swappable storage (`in-memory`, `filesystem`, `Supabase`, `Cloudflare KV/R2/D1`), structured logging with optional OpenTelemetry tracing.
 
 Finnhub-specific:
 
@@ -201,7 +196,7 @@ MCP_TRANSPORT_TYPE=http MCP_SESSION_MODE=stateless MCP_HTTP_PORT=3010 FINNHUB_AP
 
 ### Prerequisites
 
-- [Bun v1.3.0](https://bun.sh/) or higher (or Node.js v24+).
+- [Bun v1.4.0](https://bun.sh/) or higher (or Node.js v24+).
 - A free [Finnhub API key](https://finnhub.io/register). The free tier is US equities only, real-time, 60 req/min — international symbols (any exchange-suffixed ticker like `.TO` or `.DE`) and candle/forex endpoints are paid-tier and return a clear error.
 
 ### Installation
@@ -242,7 +237,7 @@ All configuration is validated at startup via Zod schemas in `src/config/server-
 | `MCP_TRANSPORT_TYPE` | Transport: `stdio` or `http`. | `stdio` |
 | `MCP_HTTP_PORT` | Port for the HTTP server. | `3010` |
 | `MCP_HTTP_ENDPOINT_PATH` | HTTP endpoint path where the MCP server is mounted. | `/mcp` |
-| `MCP_SESSION_MODE` | Session handling: `auto`, `stateful`, or `stateless`. This project's `.env.example` and Docker image explicitly select `stateless`; an explicit environment value takes precedence. When unset, the framework defaults to `auto`, which currently resolves to `stateful`. | `auto` when unset; project example uses `stateless` |
+| `MCP_SESSION_MODE` | Session handling: `auto`, `stateful`, or `stateless`. The server declares `stateless` in `src/index.ts`, so an unset variable resolves there; `.env.example` and the Docker image set it explicitly too. An explicit environment value takes precedence. | `stateless` |
 | `MCP_AUTH_MODE` | Auth mode: `none`, `jwt`, or `oauth`. | `none` |
 | `MCP_LOG_LEVEL` | Log level (RFC 5424: `debug`, `info`, `notice`, `warning`, `error`). | `info` |
 | `STORAGE_PROVIDER_TYPE` | Storage backend: `in-memory`, `filesystem`, `supabase`, `cloudflare-kv/r2/d1`. | `in-memory` |
@@ -305,7 +300,7 @@ See [`CLAUDE.md`](./CLAUDE.md) / [`AGENTS.md`](./AGENTS.md) for development guid
 
 ## Contributing
 
-Issues and pull requests are welcome. Run checks and tests before submitting:
+Issues are welcome. Run checks and tests before submitting:
 
 ```sh
 bun run devcheck
