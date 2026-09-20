@@ -15,6 +15,13 @@ await createApp({
   title: 'finnhub-mcp-server',
   tools: allToolDefinitions,
   resources: allResourceDefinitions,
+  /**
+   * Every tool here is a single-shot read against Finnhub — nothing calls
+   * `ctx.requestInput`, so no HTTP caller needs a live session. Declaring the
+   * posture in source makes it independent of the launch environment; an
+   * explicit `MCP_SESSION_MODE` still wins.
+   */
+  sessionMode: 'stateless',
   instructions:
     'Real-time US-equity market data via Finnhub. Start from a company name: finnhub_search_symbols resolves it to a US ticker, then finnhub_get_quote / _company / _earnings / _news / _recommendations work from that symbol. Free tier is US equities only — international symbols (exchange-suffixed like ".TO") return a clear not_us_or_paid error. Quotes report whether the price is live or the prior close via priceIsLive.',
   setup(core) {
