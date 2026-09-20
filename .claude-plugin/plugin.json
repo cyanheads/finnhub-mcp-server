@@ -1,20 +1,48 @@
 {
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
   "name": "finnhub-mcp-server",
   "version": "0.1.4",
   "description": "Real-time US-equity quotes, company fundamentals, earnings, analyst trends, and news via Finnhub.",
   "author": {
-    "name": "Casey Hand"
+    "name": "Casey Hand",
+    "email": "casey@caseyjhand.com",
+    "url": "https://caseyjhand.com"
   },
   "homepage": "https://github.com/cyanheads/finnhub-mcp-server#readme",
   "repository": "https://github.com/cyanheads/finnhub-mcp-server",
   "license": "Apache-2.0",
+  "keywords": [
+    "mcp",
+    "mcp-server",
+    "model-context-protocol",
+    "typescript",
+    "bun",
+    "stdio",
+    "streamable-http",
+    "finnhub",
+    "finance",
+    "stocks",
+    "market-data",
+    "quotes",
+    "earnings",
+    "stock-market"
+  ],
+  "userConfig": {
+    "FINNHUB_API_KEY": {
+      "type": "string",
+      "title": "Finnhub API Key",
+      "description": "Free Finnhub API key from https://finnhub.io/register (Dashboard → API key). Free tier: 60 req/min, US real-time.",
+      "sensitive": true,
+      "default": ""
+    }
+  },
   "mcpServers": {
     "finnhub-mcp-server": {
       "command": "npx",
       "args": ["-y", "@cyanheads/finnhub-mcp-server"],
       "env": {
         "MCP_TRANSPORT_TYPE": "stdio",
-        "FINNHUB_API_KEY": "your-api-key"
+        "FINNHUB_API_KEY": "${user_config.FINNHUB_API_KEY}"
       }
     }
   }

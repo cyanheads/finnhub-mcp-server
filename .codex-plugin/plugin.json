@@ -31,7 +31,7 @@
     "displayName": "finnhub-mcp-server",
     "shortDescription": "Real-time US-equity market data via Finnhub.",
     "longDescription": "Six tools covering real-time US-equity market data via the Finnhub REST API: resolve a company name to a US ticker, fetch a live quote paired with market-open status (never presenting a stale price as live), get one-call company context (profile + fundamentals + peers), read earnings history and the upcoming-releases calendar, pull company or market news, and surface analyst recommendation trends. Free tier covers US stocks only; a free Finnhub API key is required.",
-    "developerName": "Casey Hand",
+    "developerName": "cyanheads",
     "category": "Finance",
     "capabilities": ["Read"],
     "websiteURL": "https://github.com/cyanheads/finnhub-mcp-server",

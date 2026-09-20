@@ -3,8 +3,8 @@
     "command": "npx",
     "args": ["-y", "@cyanheads/finnhub-mcp-server"],
     "env": {
-      "MCP_TRANSPORT_TYPE": "stdio",
-      "FINNHUB_API_KEY": "your-api-key"
-    }
+      "MCP_TRANSPORT_TYPE": "stdio"
+    },
+    "env_vars": ["FINNHUB_API_KEY"]
   }
 }
