@@ -1,6 +1,6 @@
 # finnhub-mcp-server - Directory Structure
 
-Generated on: 2026-09-20 21:03:17
+Generated on: 2026-10-07 11:13:20
 
 ```text
 finnhub-mcp-server/
@@ -126,9 +126,11 @@ finnhub-mcp-server/
 │   ├── clean-mcpb.ts
 │   ├── clean.ts
 │   ├── devcheck.ts
+│   ├── install-otel.ts
 │   ├── lint-mcp.ts
 │   ├── lint-packaging.ts
 │   ├── list-skills.ts
+│   ├── prune-musl-packages.ts
 │   ├── release-github.ts
 │   └── tree.ts
 ├── src/

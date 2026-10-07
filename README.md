@@ -7,7 +7,7 @@
 
 <div align="center">
 
-[![Version](https://img.shields.io/badge/Version-0.1.5-blue.svg?style=flat-square)](./CHANGELOG.md) [![License](https://img.shields.io/badge/License-Apache%202.0-orange.svg?style=flat-square)](./LICENSE) [![Docker](https://img.shields.io/badge/Docker-ghcr.io-2496ED?style=flat-square&logo=docker&logoColor=white)](https://github.com/users/cyanheads/packages/container/package/finnhub-mcp-server) [![MCP SDK](https://img.shields.io/badge/MCP%20SDK-^2.0.0-green.svg?style=flat-square)](https://modelcontextprotocol.io/) [![npm](https://img.shields.io/npm/v/@cyanheads/finnhub-mcp-server?style=flat-square&logo=npm&logoColor=white)](https://www.npmjs.com/package/@cyanheads/finnhub-mcp-server) [![TypeScript](https://img.shields.io/badge/TypeScript-^7.0.2-3178C6.svg?style=flat-square)](https://www.typescriptlang.org/) [![Bun](https://img.shields.io/badge/Bun-v1.4.0-blueviolet.svg?style=flat-square)](https://bun.sh/)
+[![Version](https://img.shields.io/badge/Version-0.1.5-blue.svg?style=flat-square)](./CHANGELOG.md) [![License](https://img.shields.io/badge/License-Apache%202.0-orange.svg?style=flat-square)](./LICENSE) [![Docker](https://img.shields.io/badge/Docker-ghcr.io-2496ED?style=flat-square&logo=docker&logoColor=white)](https://github.com/users/cyanheads/packages/container/package/finnhub-mcp-server) [![MCP SDK](https://img.shields.io/badge/MCP%20SDK-^2.2.0-green.svg?style=flat-square)](https://modelcontextprotocol.io/) [![npm](https://img.shields.io/npm/v/@cyanheads/finnhub-mcp-server?style=flat-square&logo=npm&logoColor=white)](https://www.npmjs.com/package/@cyanheads/finnhub-mcp-server) [![TypeScript](https://img.shields.io/badge/TypeScript-^7.0.2-3178C6.svg?style=flat-square)](https://www.typescriptlang.org/) [![Bun](https://img.shields.io/badge/Bun-v1.4.2-blueviolet.svg?style=flat-square)](https://bun.sh/)
 
 </div>
 
@@ -48,47 +48,36 @@ Fully covered by the `category` enum on `finnhub_get_news`, so tool-only clients
 
 ### `finnhub_search_symbols` <sub>tool</sub>
 
-- Full-text match across symbols and descriptions; likely-US Common Stock matches surfaced first
-- `query` accepts 1–20 characters; use a shorter company name or ticker fragment when needed
-- Each result carries `isLikelyUS`, a symbol-format heuristic: plain tickers and `.A`/`.B` class shares are likely US, while exchange suffixes such as `.SS`, `.T`, and `.L` are not. Quote and profile responses remain authoritative
-- `limit` (1–50, default 10); reports the total match count and discloses truncation when more matched than returned
+- Search by company name or ticker fragment with `query` (1–20 characters) and `limit` (1–50, default 10).
+- Returns likely-US Common Stock matches first, with an `isLikelyUS` symbol-format heuristic, total match count, and truncation disclosure. Quote and profile responses remain authoritative.
 
 ---
 
 ### `finnhub_get_quote` <sub>tool</sub>
 
-- Current price, absolute and percent change, session open/high/low, previous close, and an ISO 8601 quote time
-- Pairs `/quote` with `/stock/market-status` (parallel fan-out) to derive `priceIsLive` — `true` only when the US market is open; when closed, `current` is the prior close, surfaced as such
-- Exposes Finnhub's nullable `session` (`pre-market`, `regular`, or `post-market`) and returned holiday event name without inferring either value
-- Market-status failing degrades to `marketOpen: null`, `session: null`, and `holiday: null` rather than tanking the quote
-- Unknown US ticker → `symbol_not_found`; international or paid-only symbol → `not_us_or_paid`
+- Requires `symbol`; returns current price, change, session open/high/low, previous close, and an ISO 8601 quote time.
+- `priceIsLive` distinguishes a live price from the prior close; `marketOpen`, `session`, and `holiday` are nullable when market status is unavailable. Unknown ticker → `symbol_not_found`; international or paid-only symbol → `not_us_or_paid`.
 
 ---
 
 ### `finnhub_get_company` <sub>tool</sub>
 
-- Profile: name, exchange, industry, country, currency, market cap, shares outstanding, IPO date, website, logo
-- Headline fundamentals: P/E (TTM), EPS (TTM), 52-week range, beta, dividend yield, net/gross margin, revenue growth YoY, ROE — every field nullable, surfaced honestly for thinly-covered names rather than zero-filled
-- Sector peers from `/stock/peers` (includes the queried symbol)
-- Combines three endpoints under a parallel fan-out; metrics or peers failing degrade to a `partial` list, profile drives the not-found / forbidden errors
+- Requires `symbol`; returns company profile, nullable headline fundamentals (P/E, EPS, 52-week range, beta, dividend yield, margins, growth, ROE), and sector peers.
+- Failed metrics or peers appear in `partial`; the profile determines `symbol_not_found` and `not_us_or_paid` errors.
 
 ---
 
 ### `finnhub_get_earnings` <sub>tool</sub>
 
-- `history` (requires `symbol`): past quarters — actual vs. estimate EPS, absolute surprise, and surprise % (the market-moving signal), newest first
-- `calendar` (uses `from` / `to`, defaults to today through +14 days; optional `symbol` filter): upcoming releases across the market or for one symbol — date, EPS/revenue estimates, expected report time
-- `limit` (1–100, default 50); reports total rows and discloses truncation
-- `history` without `symbol` → `missing_symbol`; international or paid-only symbol → `not_us_or_paid`
+- `history` requires `symbol` and returns past quarters' actual/estimate EPS and surprise, newest first. `calendar` accepts `from` / `to` (default today through +14 days) and an optional `symbol`, returning release dates, EPS/revenue estimates, and report times.
+- `limit` (1–100, default 50) caps rows with total and truncation disclosure. History without a symbol → `missing_symbol`; international or paid-only symbol → `not_us_or_paid`.
 
 ---
 
 ### `finnhub_get_news` <sub>tool</sub>
 
-- `company` (requires `symbol`): recent articles over a date range (defaults to the last 7 days) — headline, source, ISO 8601 datetime, summary, URL
-- `market` (uses `category`): broad headlines by `general`, `forex`, `crypto`, or `merger` (see the `finnhub://news-categories` resource)
-- `limit` (1–100, default 15 — news lists run long); articles newest first, with total and truncation disclosure
-- `company` without `symbol` → `missing_symbol`; international or paid-only symbol → `not_us_or_paid`
+- `company` requires `symbol` and accepts a date range (default last 7 days). `market` uses `category`: `general`, `forex`, `crypto`, or `merger` (see `finnhub://news-categories`).
+- Returns headline, source, ISO 8601 datetime, summary, and URL, newest first. `limit` (1–100, default 15) caps articles with total and truncation disclosure; company mode without a symbol → `missing_symbol`, international or paid-only symbol → `not_us_or_paid`.
 
 ---
 
@@ -240,8 +229,11 @@ All configuration is validated at startup via Zod schemas in `src/config/server-
 | `MCP_SESSION_MODE` | Session handling: `auto`, `stateful`, or `stateless`. The server declares `stateless` in `src/index.ts`, so an unset variable resolves there; `.env.example` and the Docker image set it explicitly too. An explicit environment value takes precedence. | `stateless` |
 | `MCP_AUTH_MODE` | Auth mode: `none`, `jwt`, or `oauth`. | `none` |
 | `MCP_LOG_LEVEL` | Log level (RFC 5424: `debug`, `info`, `notice`, `warning`, `error`). | `info` |
+| `LOG_TOOL_FAILURE_PAYLOADS` | Log failed tool calls' arguments and results, redacted by key name and capped at `LOG_TOOL_FAILURE_PAYLOAD_MAX_BYTES` (default `16384`). Secrets inside free-form values are not redacted. | `false` |
 | `STORAGE_PROVIDER_TYPE` | Storage backend: `in-memory`, `filesystem`, `supabase`, `cloudflare-kv/r2/d1`. | `in-memory` |
 | `OTEL_ENABLED` | Enable [OpenTelemetry instrumentation](https://github.com/cyanheads/mcp-ts-core/tree/main/docs/telemetry) (spans, metrics, completion logs). | `false` |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | OTLP base URL for traces (`/v1/traces`) and metrics (`/v1/metrics`); signal-specific endpoints override it. | — |
+| `OTEL_EXPORTER_OTLP_LOGS_ENDPOINT` | Opt-in OTLP log endpoint, used as-is. The base URL does not enable log export. | — |
 
 See [`.env.example`](./.env.example) for the full list of optional overrides.
 

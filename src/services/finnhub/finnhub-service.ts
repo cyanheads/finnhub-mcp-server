@@ -146,7 +146,7 @@ export class FinnhubService {
    * retry while deterministic failures (401/403) fail fast.
    *
    * `fetchWithTimeout` throws a classified `McpError` on any non-OK status and
-   * reduces URLs in errors/logs to origin + pathname, so the `token` query
+   * reduces URLs in errors/logs to their origin, so the `token` query
    * param never reaches a client or a log line. Its default status mapping
    * matches the design for 403 (→ `Forbidden`), 429 (→ `RateLimited`), and 5xx
    * (→ `ServiceUnavailable`); only 401 is re-keyed below from `Unauthorized` to
