@@ -2,6 +2,10 @@
 
 All notable changes to this project. Each entry links to its full per-version file in [changelog/](changelog/).
 
+## [0.1.6](changelog/0.1.x/0.1.6.md) — 2026-10-07
+
+Refresh framework error handling and logging, native Docker builds, bundle exclusions, and MCP Registry launch metadata.
+
 ## [0.1.5](changelog/0.1.x/0.1.5.md) — 2026-09-20
 
 HTTP sessions default to stateless via a source-level declaration when MCP_SESSION_MODE is unset; Claude Code and Codex plugin installs now deliver FINNHUB_API_KEY instead of a placeholder; mcp-ts-core bumped to ^0.13.6.
