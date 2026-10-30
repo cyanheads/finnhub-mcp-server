@@ -1,6 +1,6 @@
 # finnhub-mcp-server - Directory Structure
 
-Generated on: 2026-10-07 11:13:20
+Generated on: 2026-10-30 09:12:35
 
 ```text
 finnhub-mcp-server/
@@ -25,6 +25,7 @@ finnhub-mcp-server/
 │   └── settings.json
 ├── changelog/
 │   ├── 0.1.x/
+│   ├── 0.2.x/
 │   └── template.md
 ├── docs/
 │   └── design.md
@@ -36,6 +37,8 @@ finnhub-mcp-server/
 │   ├── add-resource/
 │   │   └── SKILL.md
 │   ├── add-service/
+│   │   └── SKILL.md
+│   ├── add-skill/
 │   │   └── SKILL.md
 │   ├── add-test/
 │   │   └── SKILL.md
@@ -133,6 +136,9 @@ finnhub-mcp-server/
 │   ├── prune-musl-packages.ts
 │   ├── release-github.ts
 │   └── tree.ts
+├── skills/
+│   └── finnhub-guide/
+│       └── SKILL.md
 ├── src/
 │   ├── config/
 │   │   └── server-config.ts
@@ -172,6 +178,8 @@ finnhub-mcp-server/
 │   │           └── search-symbols.tool.test.ts
 │   ├── prompts/
 │   ├── resources/
+│   ├── scripts/
+│   │   └── bundle-agent-docs.test.ts
 │   ├── services/
 │   │   └── finnhub/
 │   │       └── finnhub-service.test.ts
@@ -191,7 +199,9 @@ finnhub-mcp-server/
 ├── Dockerfile
 ├── LICENSE
 ├── manifest.json
+├── mcp.json
 ├── package.json
+├── plugin.json
 ├── README.md
 ├── server.json
 ├── tsconfig.build.json

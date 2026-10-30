@@ -2,6 +2,10 @@
 
 All notable changes to this project. Each entry links to its full per-version file in [changelog/](changelog/).
 
+## [0.2.0](changelog/0.2.x/0.2.0.md) — 2026-10-30
+
+Normalize ticker inputs and add Finnhub workflow guidance.
+
 ## [0.1.6](changelog/0.1.x/0.1.6.md) — 2026-10-07
 
 Refresh framework error handling and logging, native Docker builds, bundle exclusions, and MCP Registry launch metadata.
