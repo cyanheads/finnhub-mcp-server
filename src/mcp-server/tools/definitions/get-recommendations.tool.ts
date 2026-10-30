@@ -16,9 +16,11 @@ export const getRecommendations = tool('finnhub_get_recommendations', {
   input: z.object({
     symbol: z
       .string()
+      .trim()
+      .toUpperCase()
       .min(1)
       .describe(
-        'US stock ticker (e.g., "AAPL"). Resolve a name with finnhub_search_symbols first.',
+        'US stock ticker (e.g., "AAPL"), trimmed and uppercased with punctuation preserved. Resolve a name with finnhub_search_symbols first.',
       ),
     limit: z
       .number()
@@ -27,11 +29,11 @@ export const getRecommendations = tool('finnhub_get_recommendations', {
       .max(24)
       .default(12)
       .describe(
-        'Max months to return, newest first. Default 12 (one year of consensus history). The API typically returns 12–24 months; setting this higher surfaces older trend data.',
+        'Maximum months to return from available upstream history, newest first (1–24, default 12). Increasing the limit returns more available rows, not history absent from Finnhub.',
       ),
   }),
   output: z.object({
-    symbol: z.string().describe('The symbol queried (echo of input).'),
+    symbol: z.string().describe('The symbol queried, trimmed and uppercased.'),
     trends: z
       .array(
         z
@@ -50,7 +52,7 @@ export const getRecommendations = tool('finnhub_get_recommendations', {
           .describe('One month of analyst recommendation counts.'),
       )
       .describe(
-        'Recommendation counts per month, newest first. Typically 12–24 months of history.',
+        'Recommendation counts per month, newest first. History depth depends on Finnhub coverage.',
       ),
   }),
 
@@ -67,7 +69,7 @@ export const getRecommendations = tool('finnhub_get_recommendations', {
       code: JsonRpcErrorCode.NotFound,
       when: 'Endpoint returned an empty array — no analyst coverage for the symbol.',
       recovery:
-        'Verify the symbol is valid with finnhub_search_symbols; some thinly-traded or newly-listed stocks have no analyst coverage on Finnhub.',
+        'Verify the ticker with finnhub_search_symbols. ETFs, funds, or trusts may lack analyst coverage, as may thinly-traded or newly-listed stocks; try finnhub_get_quote for price data.',
     },
     {
       reason: 'not_us_or_paid',

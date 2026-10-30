@@ -15,6 +15,7 @@ await createApp({
   title: 'finnhub-mcp-server',
   tools: allToolDefinitions,
   resources: allResourceDefinitions,
+  skills: 'skills',
   /**
    * Every tool here is a single-shot read against Finnhub — nothing calls
    * `ctx.requestInput`, so no HTTP caller needs a live session. Declaring the
@@ -23,7 +24,7 @@ await createApp({
    */
   sessionMode: 'stateless',
   instructions:
-    'Real-time US-equity market data via Finnhub. Start from a company name: finnhub_search_symbols resolves it to a US ticker, then finnhub_get_quote / _company / _earnings / _news / _recommendations work from that symbol. Free tier is US equities only — international symbols (exchange-suffixed like ".TO") return a clear not_us_or_paid error. Quotes report whether the price is live or the prior close via priceIsLive.',
+    'US-equity market data and financial news via Finnhub. Resolve an unfamiliar company name with finnhub_search_symbols, then pass the returned symbol to finnhub_get_quote / _company / _earnings / _news / _recommendations. Endpoint coverage varies by instrument and plan; not_us_or_paid indicates access restrictions. Read quoteTime together with priceIsLive and market-status fields when describing price freshness.',
   setup(core) {
     initFinnhubService(core.config, core.storage);
   },

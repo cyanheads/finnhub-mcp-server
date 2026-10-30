@@ -17,13 +17,15 @@ export const getQuote = tool('finnhub_get_quote', {
   input: z.object({
     symbol: z
       .string()
+      .trim()
+      .toUpperCase()
       .min(1)
       .describe(
-        'US stock ticker (e.g., "AAPL", "MSFT"). Resolve a company name with finnhub_search_symbols first. International symbols (with an exchange suffix like ".TO") are not on the free tier and return a clear error.',
+        'US stock ticker (e.g., "AAPL", "MSFT", "BRK.B"). Trimmed and uppercased; punctuation is preserved. Resolve a company name with finnhub_search_symbols first. International symbols (with an exchange suffix like ".TO") are not on the free tier and return a clear error.',
       ),
   }),
   output: z.object({
-    symbol: z.string().describe('The symbol quoted (echo of input).'),
+    symbol: z.string().describe('The symbol quoted, trimmed and uppercased.'),
     current: z
       .number()
       .describe(

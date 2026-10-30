@@ -24,13 +24,15 @@ export const getCompany = tool('finnhub_get_company', {
   input: z.object({
     symbol: z
       .string()
+      .trim()
+      .toUpperCase()
       .min(1)
       .describe(
-        'US stock ticker (e.g., "AAPL"). Resolve a company name with finnhub_search_symbols first. International symbols are not on the free tier.',
+        'US stock ticker (e.g., "AAPL"), trimmed and uppercased with punctuation preserved. Resolve a company name with finnhub_search_symbols first. International symbols are not on the free tier.',
       ),
   }),
   output: z.object({
-    symbol: z.string().describe('The symbol queried (echo of input).'),
+    symbol: z.string().describe('The symbol queried, trimmed and uppercased.'),
     profile: z
       .object({
         name: z.string().describe('Company name.'),
@@ -86,7 +88,7 @@ export const getCompany = tool('finnhub_get_company', {
       code: JsonRpcErrorCode.NotFound,
       when: '/stock/profile2 returned an empty object for the symbol.',
       recovery:
-        'Verify the ticker, or call finnhub_search_symbols to resolve the company name first.',
+        'Verify the ticker with finnhub_search_symbols. ETFs, funds, or trusts may lack company profiles; try finnhub_get_quote for price data.',
     },
     {
       reason: 'not_us_or_paid',

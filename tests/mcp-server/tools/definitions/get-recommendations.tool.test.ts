@@ -4,7 +4,7 @@
  */
 
 import { forbidden, JsonRpcErrorCode } from '@cyanheads/mcp-ts-core/errors';
-import { createMockContext, getEnrichment } from '@cyanheads/mcp-ts-core/testing';
+import { createMockContext, getEnrichment, runToolContract } from '@cyanheads/mcp-ts-core/testing';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { getRecommendations } from '@/mcp-server/tools/definitions/get-recommendations.tool.js';
 import * as svc from '@/services/finnhub/finnhub-service.js';
@@ -21,6 +21,106 @@ function mockRecs(impl: () => unknown): void {
 
 describe('getRecommendations', () => {
   afterEach(() => vi.restoreAllMocks());
+
+  it('rejects whitespace-only recommendation input before fetching', async () => {
+    mockRecs(() => []);
+    const result = await runToolContract(getRecommendations, { symbol: '   ' });
+    expect(result.structuredContent).toMatchObject({
+      error: { code: JsonRpcErrorCode.InvalidParams },
+    });
+    expect(svc.getFinnhubService().recommendations).not.toHaveBeenCalled();
+  });
+
+  it('normalizes the symbol in forbidden recommendation errors', async () => {
+    mockRecs(() => forbidden('HTTP 403'));
+    const result = await runToolContract(getRecommendations, { symbol: ' sap.de ' });
+    expect(result.structuredContent).toMatchObject({
+      error: {
+        code: JsonRpcErrorCode.Forbidden,
+        data: { reason: 'not_us_or_paid', symbol: 'SAP.DE' },
+      },
+    });
+    expect(result.content).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ text: expect.stringContaining('paid plan') }),
+      ]),
+    );
+  });
+
+  it('normalizes recommendation requests and the symbol on both surfaces', async () => {
+    mockRecs(() => [
+      {
+        symbol: 'AAPL',
+        period: '2026-10-01',
+        strongBuy: 1,
+        buy: 2,
+        hold: 3,
+        sell: 0,
+        strongSell: 0,
+      },
+    ]);
+    const result = await runToolContract(getRecommendations, { symbol: ' aapl ' });
+    expect(svc.getFinnhubService().recommendations).toHaveBeenCalledWith('AAPL', expect.anything());
+    expect(result.structuredContent).toMatchObject({ symbol: 'AAPL', totalCount: 1 });
+    expect(result.content).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ text: expect.stringContaining('**AAPL**') }),
+      ]),
+    );
+  });
+
+  it.each([
+    ['spy', 'SPY'],
+    [' qqq ', 'QQQ'],
+    ['zzzzbogus', 'ZZZZBOGUS'],
+  ])('keeps %s no-coverage recovery conditional on both surfaces', async (symbol, normalized) => {
+    mockRecs(() => []);
+    const result = await runToolContract(getRecommendations, { symbol });
+    expect(result.structuredContent).toMatchObject({
+      error: {
+        code: JsonRpcErrorCode.NotFound,
+        data: {
+          reason: 'no_coverage',
+          symbol: normalized,
+          recovery: { hint: expect.stringContaining('ETFs, funds, or trusts may') },
+        },
+      },
+    });
+    const text = result.content.map((b) => (b.type === 'text' ? b.text : '')).join('');
+    expect(text).toContain('finnhub_get_quote');
+    expect(text).toContain('finnhub_search_symbols');
+    expect(text).toContain('ETFs, funds, or trusts may');
+    expect(svc.getFinnhubService().recommendations).toHaveBeenCalledTimes(1);
+  });
+
+  it('caps available history without inventing older months and keeps limit bounds', async () => {
+    mockRecs(() => [
+      {
+        symbol: 'AAPL',
+        period: '2026-10-01',
+        strongBuy: 1,
+        buy: 2,
+        hold: 3,
+        sell: 0,
+        strongSell: 0,
+      },
+    ]);
+    const ctx = createMockContext({ errors: getRecommendations.errors });
+    const result = await getRecommendations.handler(
+      getRecommendations.input.parse({ symbol: 'AAPL', limit: 24 }),
+      ctx,
+    );
+    expect(result.trends).toHaveLength(1);
+    expect(getEnrichment(ctx)).toEqual({ totalCount: 1 });
+    expect(getRecommendations.input.parse({ symbol: 'AAPL' }).limit).toBe(12);
+    expect(() => getRecommendations.input.parse({ symbol: 'AAPL', limit: 0 })).toThrow();
+    expect(() => getRecommendations.input.parse({ symbol: 'AAPL', limit: 25 })).toThrow();
+    expect(getRecommendations.format!(result)).toEqual([
+      expect.objectContaining({
+        text: expect.stringContaining('2026-10-01: 1 strong-buy / 2 buy / 3 hold'),
+      }),
+    ]);
+  });
 
   it('returns analyst trend counts, newest month first', async () => {
     mockRecs(() => [

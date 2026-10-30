@@ -4,7 +4,7 @@
  */
 
 import { forbidden, JsonRpcErrorCode } from '@cyanheads/mcp-ts-core/errors';
-import { createMockContext, getEnrichment } from '@cyanheads/mcp-ts-core/testing';
+import { createMockContext, getEnrichment, runToolContract } from '@cyanheads/mcp-ts-core/testing';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { getEarnings } from '@/mcp-server/tools/definitions/get-earnings.tool.js';
 import * as svc from '@/services/finnhub/finnhub-service.js';
@@ -29,6 +29,94 @@ function mockService(mocks: Mocks): void {
 
 describe('getEarnings', () => {
   afterEach(() => vi.restoreAllMocks());
+
+  it.each(['history', 'calendar'] as const)(
+    'normalizes the symbol in forbidden %s errors',
+    async (mode) => {
+      mockService({
+        earnings: () => forbidden('HTTP 403'),
+        earningsCalendar: () => forbidden('HTTP 403'),
+      });
+      const result = await runToolContract(getEarnings, { mode, symbol: ' sap.de ' });
+      expect(result.structuredContent).toMatchObject({
+        error: {
+          code: JsonRpcErrorCode.Forbidden,
+          data: { reason: 'not_us_or_paid', symbol: 'SAP.DE' },
+        },
+      });
+      expect(result.content).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ text: expect.stringContaining('paid plan') }),
+        ]),
+      );
+    },
+  );
+
+  it.each([
+    [' spy ', 'SPY'],
+    ['qqq', 'QQQ'],
+    ['zzzzbogus', 'ZZZZBOGUS'],
+  ])(
+    'normalizes %s history and preserves conditional empty-success guidance on both surfaces',
+    async (symbol, normalized) => {
+      mockService({ earnings: () => [] });
+      const result = await runToolContract(getEarnings, { mode: 'history', symbol });
+      expect(svc.getFinnhubService().earnings).toHaveBeenCalledWith(normalized, expect.anything());
+      expect(result.isError).not.toBe(true);
+      expect(result.structuredContent).toMatchObject({
+        mode: 'history',
+        history: [],
+        totalCount: 0,
+        notice: expect.stringContaining('ETFs, funds, or trusts may'),
+      });
+      const text = result.content.map((b) => (b.type === 'text' ? b.text : '')).join('');
+      expect(text).toContain('ETFs, funds, or trusts may');
+      expect(text).toContain(`"${normalized}"`);
+      expect(text).toContain('finnhub_get_quote');
+      expect(text).toContain('finnhub_search_symbols');
+      expect(svc.getFinnhubService().earnings).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it.each([
+    [' brk.b ', 'BRK.B'],
+    ['   ', undefined],
+  ])(
+    'normalizes optional calendar filter %j before fetching and empty-result guidance',
+    async (symbol, normalized) => {
+      mockService({ earningsCalendar: () => ({ earningsCalendar: [] }) });
+      const result = await runToolContract(getEarnings, {
+        mode: 'calendar',
+        symbol,
+        from: '2030-01-01',
+        to: '2030-01-02',
+      });
+      expect(svc.getFinnhubService().earningsCalendar).toHaveBeenCalledWith(
+        '2030-01-01',
+        '2030-01-02',
+        normalized,
+        expect.anything(),
+      );
+      const notice = normalized
+        ? 'No earnings releases for "BRK.B" between 2030-01-01 and 2030-01-02. Widen the date window.'
+        : 'No earnings releases between 2030-01-01 and 2030-01-02. Widen the date window.';
+      expect(result.structuredContent).toMatchObject({ notice, calendar: [] });
+      expect(result.content).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ text: expect.stringContaining(notice) }),
+        ]),
+      );
+    },
+  );
+
+  it('rejects whitespace-only history without making an unfiltered request', async () => {
+    mockService({ earnings: () => [] });
+    const result = await runToolContract(getEarnings, { mode: 'history', symbol: ' \t ' });
+    expect(result.structuredContent).toMatchObject({
+      error: { code: JsonRpcErrorCode.ValidationError, data: { reason: 'missing_symbol' } },
+    });
+    expect(svc.getFinnhubService().earnings).not.toHaveBeenCalled();
+  });
 
   it('history mode: surfaces actual-vs-estimate surprise %, newest first', async () => {
     mockService({

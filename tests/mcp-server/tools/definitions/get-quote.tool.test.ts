@@ -4,7 +4,7 @@
  */
 
 import { forbidden, JsonRpcErrorCode } from '@cyanheads/mcp-ts-core/errors';
-import { createMockContext } from '@cyanheads/mcp-ts-core/testing';
+import { createMockContext, runToolContract } from '@cyanheads/mcp-ts-core/testing';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { getQuote } from '@/mcp-server/tools/definitions/get-quote.tool.js';
 import * as svc from '@/services/finnhub/finnhub-service.js';
@@ -42,6 +42,78 @@ const liveQuote = {
 
 describe('getQuote', () => {
   afterEach(() => vi.restoreAllMocks());
+
+  it('normalizes the symbol in forbidden error data and text', async () => {
+    mockService({
+      quote: () => forbidden('HTTP 403'),
+      marketStatus: () => ({ isOpen: false, session: null, holiday: null }),
+    });
+    const result = await runToolContract(getQuote, { symbol: ' shop.to ' });
+    expect(result.structuredContent).toMatchObject({
+      error: {
+        code: JsonRpcErrorCode.Forbidden,
+        data: { reason: 'not_us_or_paid', symbol: 'SHOP.TO' },
+      },
+    });
+    expect(result.content).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ text: expect.stringContaining('paid plan') }),
+      ]),
+    );
+    expect(svc.getFinnhubService().quote).toHaveBeenCalledWith('SHOP.TO', expect.anything());
+  });
+
+  it.each([
+    ['aapl', 'AAPL'],
+    ['mSfT', 'MSFT'],
+    [' AAPL ', 'AAPL'],
+    [' brk.b ', 'BRK.B'],
+    [' BF-A ', 'BF-A'],
+  ])('normalizes %s before quote requests and on both surfaces', async (symbol, normalized) => {
+    mockService({
+      quote: () => liveQuote,
+      marketStatus: () => ({ isOpen: true, session: 'regular', holiday: null }),
+    });
+    const service = svc.getFinnhubService();
+    const result = await runToolContract(getQuote, { symbol });
+    expect(service.quote).toHaveBeenCalledWith(normalized, expect.anything());
+    expect(result.structuredContent).toMatchObject({ symbol: normalized, current: 291.13 });
+    expect(result.content).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ text: expect.stringContaining(`**${normalized}**`) }),
+      ]),
+    );
+  });
+
+  it.each(['', '   ', '\t\n'])(
+    'rejects blank required symbol %j before any upstream work',
+    async (symbol) => {
+      mockService({ quote: () => liveQuote });
+      const service = svc.getFinnhubService();
+      const result = await runToolContract(getQuote, { symbol });
+      expect(result.isError).toBe(true);
+      expect(result.structuredContent).toMatchObject({
+        error: { code: JsonRpcErrorCode.InvalidParams },
+      });
+      expect(service.quote).not.toHaveBeenCalled();
+      expect(service.marketStatus).not.toHaveBeenCalled();
+    },
+  );
+
+  it('preserves an uppercase US class-share symbol in the quote and text', async () => {
+    mockService({
+      quote: () => liveQuote,
+      marketStatus: () => ({ isOpen: true, session: 'regular', holiday: null }),
+    });
+    const result = await getQuote.handler(
+      getQuote.input.parse({ symbol: 'BRK.B' }),
+      createMockContext({ errors: getQuote.errors }),
+    );
+    expect(result.symbol).toBe('BRK.B');
+    expect(getQuote.format!(result)).toEqual([
+      expect.objectContaining({ text: expect.stringContaining('**BRK.B**') }),
+    ]);
+  });
 
   it('returns a live quote with priceIsLive=true when the market is open', async () => {
     mockService({

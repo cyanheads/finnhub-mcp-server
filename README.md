@@ -1,13 +1,13 @@
 <div align="center">
   <h1>@cyanheads/finnhub-mcp-server</h1>
   <p><b>Real-time US-equity quotes, company fundamentals, earnings, analyst trends, and financial news via Finnhub. STDIO or Streamable HTTP.</b>
-  <div>6 Tools • 1 Resource</div>
+  <div>6 Tools • 2 Resources</div>
   </p>
 </div>
 
 <div align="center">
 
-[![Version](https://img.shields.io/badge/Version-0.1.6-blue.svg?style=flat-square)](./CHANGELOG.md) [![License](https://img.shields.io/badge/License-Apache%202.0-orange.svg?style=flat-square)](./LICENSE) [![Docker](https://img.shields.io/badge/Docker-ghcr.io-2496ED?style=flat-square&logo=docker&logoColor=white)](https://github.com/users/cyanheads/packages/container/package/finnhub-mcp-server) [![MCP SDK](https://img.shields.io/badge/MCP%20SDK-^2.2.0-green.svg?style=flat-square)](https://modelcontextprotocol.io/) [![npm](https://img.shields.io/npm/v/@cyanheads/finnhub-mcp-server?style=flat-square&logo=npm&logoColor=white)](https://www.npmjs.com/package/@cyanheads/finnhub-mcp-server) [![TypeScript](https://img.shields.io/badge/TypeScript-^7.0.2-3178C6.svg?style=flat-square)](https://www.typescriptlang.org/) [![Bun](https://img.shields.io/badge/Bun-v1.4.2-blueviolet.svg?style=flat-square)](https://bun.sh/)
+[![Version](https://img.shields.io/badge/Version-0.1.6-blue.svg?style=flat-square)](./CHANGELOG.md) [![License](https://img.shields.io/badge/License-Apache%202.0-orange.svg?style=flat-square)](./LICENSE) [![Docker](https://img.shields.io/badge/Docker-ghcr.io-2496ED?style=flat-square&logo=docker&logoColor=white)](https://github.com/users/cyanheads/packages/container/package/finnhub-mcp-server) [![MCP SDK](https://img.shields.io/badge/MCP%20SDK-^2.4.0-green.svg?style=flat-square)](https://modelcontextprotocol.io/) [![npm](https://img.shields.io/npm/v/@cyanheads/finnhub-mcp-server?style=flat-square&logo=npm&logoColor=white)](https://www.npmjs.com/package/@cyanheads/finnhub-mcp-server) [![TypeScript](https://img.shields.io/badge/TypeScript-^7.0.2-3178C6.svg?style=flat-square)](https://www.typescriptlang.org/) [![Bun](https://img.shields.io/badge/Bun-v1.4.4-blueviolet.svg?style=flat-square)](https://bun.sh/)
 
 </div>
 
@@ -23,7 +23,9 @@
 
 ## Overview
 
-Real-time US-equity data from Finnhub — quotes, company fundamentals, earnings, analyst recommendations, and financial news. Resolve a company name to a symbol with `finnhub_search_symbols`, then pull live pricing, valuation, or news for it from any MCP client. Runs as a stdio process or a local Streamable HTTP server.
+Real-time US stock data from Finnhub: quotes, company fundamentals, earnings, analyst recommendations, and financial news. Look up a company by name, then pull live pricing, valuation, or news for it.
+
+Ticker inputs are trimmed and uppercased; punctuation such as `BRK.B` is preserved. Earnings calendar filters may be omitted or blank for market-wide results; earnings history and company news require a nonblank symbol. Search queries retain their original spelling, and market news ignores `symbol`.
 
 ### Tools
 
@@ -41,8 +43,9 @@ Real-time US-equity data from Finnhub — quotes, company fundamentals, earnings
 | Resource | Description |
 |:---|:---|
 | `finnhub://news-categories` | The four valid market-news categories (`general`, `forex`, `crypto`, `merger`) with one-line descriptions. |
+| `skill://finnhub-guide/SKILL.md` | Agent guide for company and earnings briefings, security identity, quote freshness, and coverage gaps. |
 
-Fully covered by the `category` enum on `finnhub_get_news`, so tool-only clients lose nothing.
+The news-category reference mirrors the `category` enum on `finnhub_get_news`. The [finnhub guide](./skills/finnhub-guide/SKILL.md) also ships with plugin installs, npm, Docker, and the desktop bundle.
 
 ## Capability reference
 
@@ -83,9 +86,9 @@ Fully covered by the `category` enum on `finnhub_get_news`, so tool-only clients
 
 ### `finnhub_get_recommendations` <sub>tool</sub>
 
-- Per-month strong-buy / buy / hold / sell / strong-sell counts, newest first (typically 12–24 months of history)
-- `limit` (1–24, default 12 — one year); reports total months and discloses truncation
-- Empty result (no analyst coverage) → `no_coverage`, distinct from an invalid symbol; international or paid-only symbol → `not_us_or_paid`
+- Per-month strong-buy / buy / hold / sell / strong-sell counts, newest first; history depth depends on Finnhub coverage.
+- `limit` (1–24, default 12) caps available rows; raising it cannot retrieve history absent from Finnhub. Reports total months and discloses truncation.
+- Empty result → `no_coverage`; it cannot distinguish an invalid symbol from a valid symbol without coverage. International or paid-only symbol → `not_us_or_paid`.
 
 ---
 
@@ -96,6 +99,8 @@ Fully covered by the `category` enum on `finnhub_get_news`, so tool-only clients
 - Live data (quotes, news, earnings) is intentionally not exposed as a resource — it's time-sensitive, so freshness lives only in the tools
 
 ## Features
+
+The `finnhub-guide` skill helps agents combine tool results into company and earnings briefings while preserving dates, missing values, and endpoint coverage limits. MCP clients can discover it through `skills/list` or read its `skill://finnhub-guide/SKILL.md` resource.
 
 Built on [`@cyanheads/mcp-ts-core`](https://github.com/cyanheads/mcp-ts-core): stdio and Streamable HTTP transports, pluggable auth (`none` / `jwt` / `oauth`), swappable storage (`in-memory`, `filesystem`, `Supabase`, `Cloudflare KV/R2/D1`), structured logging with optional OpenTelemetry tracing.
 
@@ -109,7 +114,8 @@ Finnhub-specific:
 Agent-friendly output:
 
 - Honest sparsity — every fundamental is nullable and absent values stay null; Finnhub's thinly-covered names are surfaced as-is, never zero-filled or fabricated
-- Two distinct "not available" signals — `symbol_not_found` (unknown US ticker, detected from the all-zero quote / empty profile sentinel) vs. `not_us_or_paid` (international or paid-only, HTTP 403) — so an agent can tell them apart and recover
+- Two distinct "not available" signals — `symbol_not_found` (all-zero quote / empty profile sentinel) vs. `not_us_or_paid` (international or paid-only, HTTP 403). An empty profile can also reflect missing instrument coverage.
+- ETFs, funds, or trusts may lack company profiles, earnings history, or analyst recommendations. Empty responses retain ticker verification guidance and suggest `finnhub_get_quote` for price data without promising quote availability.
 - Typed error contracts with recovery hints on every failure, plus the `isLikelyUS` search heuristic so an agent can prioritize likely free-tier symbols
 - Capped lists report their total count and disclose truncation, so an agent knows when more data exists
 
@@ -119,101 +125,27 @@ This server requires a free [Finnhub API key](https://finnhub.io/register) (Dash
 
 Each user must obtain their own API key. Use is subject to [Finnhub's Terms of Service](https://finnhub.io/terms-of-service) — the free tier is for personal use only, and redistributing or sharing access to Finnhub data with third parties requires written approval from Finnhub.
 
-Add the following to your MCP client configuration file.
+Add it to Claude Code:
 
-```json
-{
-  "mcpServers": {
-    "finnhub-mcp-server": {
-      "type": "stdio",
-      "command": "bunx",
-      "args": ["@cyanheads/finnhub-mcp-server@latest"],
-      "env": {
-        "MCP_TRANSPORT_TYPE": "stdio",
-        "MCP_LOG_LEVEL": "info",
-        "FINNHUB_API_KEY": "your-api-key"
-      }
-    }
-  }
-}
+```sh
+claude mcp add finnhub-mcp-server -e FINNHUB_API_KEY=your-api-key -- npx -y @cyanheads/finnhub-mcp-server
 ```
 
-Or with npx (no Bun required):
+For other clients, add this to your MCP configuration file:
 
 ```json
 {
   "mcpServers": {
     "finnhub-mcp-server": {
-      "type": "stdio",
       "command": "npx",
-      "args": ["-y", "@cyanheads/finnhub-mcp-server@latest"],
-      "env": {
-        "MCP_TRANSPORT_TYPE": "stdio",
-        "MCP_LOG_LEVEL": "info",
-        "FINNHUB_API_KEY": "your-api-key"
-      }
+      "args": ["-y", "@cyanheads/finnhub-mcp-server"],
+      "env": { "FINNHUB_API_KEY": "your-api-key" }
     }
   }
 }
 ```
 
-Or with Docker:
-
-```json
-{
-  "mcpServers": {
-    "finnhub-mcp-server": {
-      "type": "stdio",
-      "command": "docker",
-      "args": [
-        "run", "-i", "--rm",
-        "-e", "MCP_TRANSPORT_TYPE=stdio",
-        "-e", "FINNHUB_API_KEY=your-api-key",
-        "ghcr.io/cyanheads/finnhub-mcp-server:latest"
-      ]
-    }
-  }
-}
-```
-
-For Streamable HTTP, set the transport and start the server:
-
-```sh
-MCP_TRANSPORT_TYPE=http MCP_SESSION_MODE=stateless MCP_HTTP_PORT=3010 FINNHUB_API_KEY=... bun run start:http
-# Server listens at http://localhost:3010/mcp
-```
-
-### Prerequisites
-
-- [Bun v1.4.0](https://bun.sh/) or higher (or Node.js v24+).
-- A free [Finnhub API key](https://finnhub.io/register). The free tier is US equities only, real-time, 60 req/min — international symbols (any exchange-suffixed ticker like `.TO` or `.DE`) and candle/forex endpoints are paid-tier and return a clear error.
-
-### Installation
-
-1. **Clone the repository:**
-
-```sh
-git clone https://github.com/cyanheads/finnhub-mcp-server.git
-```
-
-2. **Navigate into the directory:**
-
-```sh
-cd finnhub-mcp-server
-```
-
-3. **Install dependencies:**
-
-```sh
-bun install
-```
-
-4. **Configure environment:**
-
-```sh
-cp .env.example .env
-# edit .env and set FINNHUB_API_KEY
-```
+For Docker or a source build, see [Running the server](#running-the-server).
 
 ## Configuration
 
@@ -241,6 +173,16 @@ See [`.env.example`](./.env.example) for the full list of optional overrides.
 
 ### Local development
 
+Requires [Bun v1.4.0](https://bun.sh/) or higher (or Node.js v24+), and a free [Finnhub API key](https://finnhub.io/register).
+
+```sh
+git clone https://github.com/cyanheads/finnhub-mcp-server.git
+cd finnhub-mcp-server
+bun install
+cp .env.example .env
+# Set FINNHUB_API_KEY in .env.
+```
+
 - **Build and run:**
 
   ```sh
@@ -264,11 +206,10 @@ See [`.env.example`](./.env.example) for the full list of optional overrides.
 ### Docker
 
 ```sh
-docker build -t finnhub-mcp-server .
-docker run --rm -e MCP_TRANSPORT_TYPE=http -e FINNHUB_API_KEY=your-key -p 3010:3010 finnhub-mcp-server
+docker run --rm -e FINNHUB_API_KEY=your-key -p 3010:3010 ghcr.io/cyanheads/finnhub-mcp-server:latest
 ```
 
-The Dockerfile defaults to HTTP transport, stateless session mode, and logs to `/var/log/finnhub-mcp-server`. OpenTelemetry peer dependencies are installed by default — build with `--build-arg OTEL_ENABLED=false` to omit them.
+The image defaults to HTTP transport, stateless session mode, and logs to `/var/log/finnhub-mcp-server`. For stdio, add `-i -e MCP_TRANSPORT_TYPE=stdio` to `docker run`. To build locally, run `docker build -t finnhub-mcp-server .`; OpenTelemetry peer dependencies are installed by default — build with `--build-arg OTEL_ENABLED=false` to omit them.
 
 ## Project structure
 
@@ -279,6 +220,7 @@ The Dockerfile defaults to HTTP transport, stateless session mode, and logs to `
 | `src/mcp-server/tools` | Tool definitions (`*.tool.ts`). Six tools across symbols, quotes, company, earnings, news, and recommendations. |
 | `src/mcp-server/resources` | Resource definitions (`*.resource.ts`). News-categories reference. |
 | `src/services/finnhub` | Finnhub REST client — auth, typed endpoint methods, retry, and HTTP-status classification. |
+| `skills/` | Published agent guide, also served as an MCP resource. |
 | `tests/` | Unit and integration tests mirroring `src/`. |
 
 ## Development guide

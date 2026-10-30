@@ -4,7 +4,7 @@
  */
 
 import { forbidden, JsonRpcErrorCode } from '@cyanheads/mcp-ts-core/errors';
-import { createMockContext, getEnrichment } from '@cyanheads/mcp-ts-core/testing';
+import { createMockContext, getEnrichment, runToolContract } from '@cyanheads/mcp-ts-core/testing';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { getNews } from '@/mcp-server/tools/definitions/get-news.tool.js';
 import * as svc from '@/services/finnhub/finnhub-service.js';
@@ -29,6 +29,61 @@ function mockService(mocks: Mocks): void {
 
 describe('getNews', () => {
   afterEach(() => vi.restoreAllMocks());
+
+  it('normalizes the symbol in forbidden company-news errors', async () => {
+    mockService({ companyNews: () => forbidden('HTTP 403') });
+    const result = await runToolContract(getNews, { mode: 'company', symbol: ' shop.to ' });
+    expect(result.structuredContent).toMatchObject({
+      error: {
+        code: JsonRpcErrorCode.Forbidden,
+        data: { reason: 'not_us_or_paid', symbol: 'SHOP.TO' },
+      },
+    });
+    expect(result.content).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ text: expect.stringContaining('paid plan') }),
+      ]),
+    );
+  });
+
+  it('normalizes company-news requests and empty guidance on both surfaces', async () => {
+    mockService({ companyNews: () => [] });
+    const result = await runToolContract(getNews, {
+      mode: 'company',
+      symbol: ' aapl ',
+      from: '2030-01-01',
+      to: '2030-01-02',
+    });
+    expect(svc.getFinnhubService().companyNews).toHaveBeenCalledWith(
+      'AAPL',
+      '2030-01-01',
+      '2030-01-02',
+      expect.anything(),
+    );
+    const notice =
+      'No articles for "AAPL" between 2030-01-01 and 2030-01-02. Widen the date range.';
+    expect(result.structuredContent).toMatchObject({ articles: [], totalCount: 0, notice });
+    expect(result.content).toEqual(
+      expect.arrayContaining([expect.objectContaining({ text: expect.stringContaining(notice) })]),
+    );
+  });
+
+  it('rejects whitespace-only company symbols before any request', async () => {
+    mockService({ companyNews: () => [] });
+    const result = await runToolContract(getNews, { mode: 'company', symbol: ' \t ' });
+    expect(result.structuredContent).toMatchObject({
+      error: { code: JsonRpcErrorCode.ValidationError, data: { reason: 'missing_symbol' } },
+    });
+    expect(svc.getFinnhubService().companyNews).not.toHaveBeenCalled();
+  });
+
+  it('ignores symbol in market mode', async () => {
+    mockService({ marketNews: () => [] });
+    const result = await runToolContract(getNews, { mode: 'market', symbol: ' aapl ' });
+    expect(result.structuredContent).toMatchObject({ mode: 'market', articles: [], totalCount: 0 });
+    expect(svc.getFinnhubService().marketNews).toHaveBeenCalledWith('general', expect.anything());
+    expect(svc.getFinnhubService().companyNews).not.toHaveBeenCalled();
+  });
 
   it('company mode: returns articles newest-first with epoch→ISO datetime', async () => {
     mockService({

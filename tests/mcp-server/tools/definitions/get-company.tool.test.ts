@@ -4,7 +4,7 @@
  */
 
 import { forbidden, JsonRpcErrorCode } from '@cyanheads/mcp-ts-core/errors';
-import { createMockContext } from '@cyanheads/mcp-ts-core/testing';
+import { createMockContext, runToolContract } from '@cyanheads/mcp-ts-core/testing';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { getCompany } from '@/mcp-server/tools/definitions/get-company.tool.js';
 import * as svc from '@/services/finnhub/finnhub-service.js';
@@ -60,6 +60,84 @@ const fullMetric = {
 
 describe('getCompany', () => {
   afterEach(() => vi.restoreAllMocks());
+
+  it('rejects whitespace-only company input before the three requests', async () => {
+    mockService({});
+    const result = await runToolContract(getCompany, { symbol: '   ' });
+    expect(result.structuredContent).toMatchObject({
+      error: { code: JsonRpcErrorCode.InvalidParams },
+    });
+    for (const method of [
+      svc.getFinnhubService().profile,
+      svc.getFinnhubService().metrics,
+      svc.getFinnhubService().peers,
+    ])
+      expect(method).not.toHaveBeenCalled();
+  });
+
+  it('normalizes the symbol in forbidden company errors', async () => {
+    mockService({
+      profile: () => forbidden('HTTP 403'),
+      metrics: () => fullMetric,
+      peers: () => [],
+    });
+    const result = await runToolContract(getCompany, { symbol: ' sap.de ' });
+    expect(result.structuredContent).toMatchObject({
+      error: {
+        code: JsonRpcErrorCode.Forbidden,
+        data: { reason: 'not_us_or_paid', symbol: 'SAP.DE' },
+      },
+    });
+    expect(result.content).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ text: expect.stringContaining('paid Finnhub plan') }),
+      ]),
+    );
+  });
+
+  it('normalizes symbols across all three company requests and both surfaces', async () => {
+    mockService({ profile: () => fullProfile, metrics: () => fullMetric, peers: () => [] });
+    const service = svc.getFinnhubService();
+    const result = await runToolContract(getCompany, { symbol: ' aApL ' });
+    for (const method of [service.profile, service.metrics, service.peers])
+      expect(method).toHaveBeenCalledWith('AAPL', expect.anything());
+    expect(result.structuredContent).toMatchObject({
+      symbol: 'AAPL',
+      profile: { name: 'Apple Inc' },
+    });
+    expect(result.content).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ text: expect.stringContaining('(AAPL)') }),
+      ]),
+    );
+  });
+
+  it.each([
+    [' spy ', 'SPY'],
+    ['qqq', 'QQQ'],
+    ['zzzzbogus', 'ZZZZBOGUS'],
+  ])(
+    'keeps %s empty-profile errors conditional with recovery on both surfaces',
+    async (symbol, normalized) => {
+      mockService({ profile: () => ({}), metrics: () => fullMetric, peers: () => [] });
+      const result = await runToolContract(getCompany, { symbol });
+      expect(result.structuredContent).toMatchObject({
+        error: {
+          code: JsonRpcErrorCode.NotFound,
+          data: {
+            reason: 'symbol_not_found',
+            symbol: normalized,
+            recovery: { hint: expect.stringContaining('ETFs, funds, or trusts may') },
+          },
+        },
+      });
+      const text = result.content.map((b) => (b.type === 'text' ? b.text : '')).join('');
+      expect(text).toContain('finnhub_get_quote');
+      expect(text).toContain('finnhub_search_symbols');
+      expect(text).toContain('ETFs, funds, or trusts may');
+      expect(svc.getFinnhubService().profile).toHaveBeenCalledTimes(1);
+    },
+  );
 
   it('assembles profile + fundamentals + peers in one call', async () => {
     mockService({

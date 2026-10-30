@@ -48,8 +48,12 @@ export const getNews = tool('finnhub_get_news', {
       ),
     symbol: z
       .string()
+      .trim()
+      .toUpperCase()
       .optional()
-      .describe('Required for `company` mode. US ticker. Ignored in `market` mode.'),
+      .describe(
+        'Required and nonblank for `company` mode. US ticker, trimmed and uppercased with punctuation preserved. Ignored in `market` mode.',
+      ),
     from: z
       .string()
       .optional()

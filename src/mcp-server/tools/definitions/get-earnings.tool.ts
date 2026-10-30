@@ -27,9 +27,11 @@ export const getEarnings = tool('finnhub_get_earnings', {
       ),
     symbol: z
       .string()
+      .trim()
+      .toUpperCase()
       .optional()
       .describe(
-        'Required for `history`; optionally filters `calendar` mode. US ticker. Resolve a name with finnhub_search_symbols first.',
+        'US ticker, trimmed and uppercased with punctuation preserved. Required and nonblank for `history`; optionally filters `calendar`, where blank means market-wide. Resolve a name with finnhub_search_symbols first.',
       ),
     from: z
       .string()
@@ -164,7 +166,7 @@ export const getEarnings = tool('finnhub_get_earnings', {
       ctx.enrich.total(history.length);
       if (history.length === 0) {
         ctx.enrich.notice(
-          `No earnings history for "${symbol}". Verify the symbol with finnhub_search_symbols.`,
+          `No earnings history for "${symbol}". Verify the ticker with finnhub_search_symbols. ETFs, funds, or trusts may lack earnings history; try finnhub_get_quote for price data.`,
         );
       }
       const sliced = history.slice(0, input.limit);
