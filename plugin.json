@@ -1,0 +1,33 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "finnhub-mcp-server",
+  "version": "0.1.6",
+  "description": "Real-time US-equity quotes, company fundamentals, earnings, analyst trends, and financial news via Finnhub. STDIO or Streamable HTTP.",
+  "author": {
+    "name": "Casey Hand",
+    "email": "casey@caseyjhand.com",
+    "url": "https://caseyjhand.com"
+  },
+  "homepage": "https://github.com/cyanheads/finnhub-mcp-server#readme",
+  "repository": "https://github.com/cyanheads/finnhub-mcp-server",
+  "license": "Apache-2.0",
+  "keywords": [
+    "mcp",
+    "mcp-server",
+    "model-context-protocol",
+    "typescript",
+    "bun",
+    "stdio",
+    "streamable-http",
+    "finnhub",
+    "finance",
+    "stocks",
+    "equities",
+    "market-data",
+    "quotes",
+    "earnings",
+    "stock-market",
+    "ai-agents",
+    "cyanheads"
+  ]
+}
