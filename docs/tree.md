@@ -1,6 +1,6 @@
 # finnhub-mcp-server - Directory Structure
 
-Generated on: 2026-10-30 09:12:35
+Generated on: 2026-11-20 22:45:16
 
 ```text
 finnhub-mcp-server/
@@ -155,10 +155,13 @@ finnhub-mcp-server/
 │   │           ├── get-quote.tool.ts
 │   │           ├── get-recommendations.tool.ts
 │   │           ├── index.ts
-│   │           └── search-symbols.tool.ts
+│   │           ├── search-symbols.tool.ts
+│   │           └── window-page.ts
 │   ├── services/
 │   │   └── finnhub/
+│   │       ├── date-window.ts
 │   │       ├── finnhub-service.ts
+│   │       ├── normalize-article-text.ts
 │   │       └── types.ts
 │   └── index.ts
 ├── tests/
