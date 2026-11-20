@@ -31,10 +31,10 @@ Ticker inputs are trimmed and uppercased; punctuation such as `BRK.B` is preserv
 
 | Tool | Description |
 |:---|:---|
-| `finnhub_search_symbols` | Resolve a company name or partial ticker to stock symbols, best likely-US match first. The entry point for every other tool. |
+| `finnhub_search_symbols` | Resolve a company name or ticker, optionally within one exchange. Exact ticker matches rank first. |
 | `finnhub_get_quote` | Real-time price quote for one US symbol, paired with live market-status so the response states whether the price is live or the prior close, including the returned session and named holiday. |
-| `finnhub_get_company` | Full company context in one call — profile, headline fundamentals (P/E, EPS, margins, growth), and sector peers. |
-| `finnhub_get_earnings` | Earnings in two modes: a symbol's past quarters with actual-vs-estimate surprises (`history`), or upcoming releases in a date window with an optional symbol filter (`calendar`). |
+| `finnhub_get_company` | Get a company profile, headline fundamentals, and peers grouped by sub-industry, industry, or sector. |
+| `finnhub_get_earnings` | Get quarterly EPS surprises or a calendar of releases with EPS and revenue estimates and reported actuals where available. |
 | `finnhub_get_news` | Financial news in two modes: recent articles for one symbol over a date range (`company`), or broad market headlines by category (`market`). |
 | `finnhub_get_recommendations` | Analyst recommendation trends for one US symbol — strong-buy / buy / hold / sell / strong-sell counts per month, newest first. |
 
@@ -52,7 +52,8 @@ The news-category reference mirrors the `category` enum on `finnhub_get_news`. T
 ### `finnhub_search_symbols` <sub>tool</sub>
 
 - Search by company name or ticker fragment with `query` (1–20 characters) and `limit` (1–50, default 10).
-- Returns likely-US Common Stock matches first, with an `isLikelyUS` symbol-format heuristic, total match count, and truncation disclosure. Quote and profile responses remain authoritative.
+- Exact `symbol` or `displaySymbol` matches rank first, ignoring case and retaining Finnhub's order among ties. Likely-US common stocks lead the remaining results. `isLikelyUS` describes symbol format. Endpoint coverage varies by security.
+- Supply `exchange: "US"` for US listings. An omitted or blank exchange searches globally. A name search within one exchange can miss an ADR that a ticker search finds.
 
 ---
 
@@ -65,29 +66,31 @@ The news-category reference mirrors the `category` enum on `finnhub_get_news`. T
 
 ### `finnhub_get_company` <sub>tool</sub>
 
-- Requires `symbol`; returns company profile, nullable headline fundamentals (P/E, EPS, 52-week range, beta, dividend yield, margins, growth, ROE), and sector peers.
+- Requires `symbol` and returns the profile, nullable headline fundamentals, and peers. Set `peerGrouping` to `subIndustry` (default), `industry`, or `sector`. The response identifies the selected grouping.
 - Failed metrics or peers appear in `partial`; the profile determines `symbol_not_found` and `not_us_or_paid` errors.
 
 ---
 
 ### `finnhub_get_earnings` <sub>tool</sub>
 
-- `history` requires `symbol` and returns past quarters' actual/estimate EPS and surprise, newest first. `calendar` accepts `from` / `to` (default today through +14 days) and an optional `symbol`, returning release dates, EPS/revenue estimates, and report times.
-- `limit` (1–100, default 50) caps rows with total and truncation disclosure. History without a symbol → `missing_symbol`; international or paid-only symbol → `not_us_or_paid`.
+- `history` requires a symbol and returns up to `limit` available quarters of EPS actuals, estimates, and surprises (default 50).
+- `calendar` accepts an optional symbol and inclusive UTC dates (`YYYY-MM-DD`, default today through 14 days ahead). Recently reported releases can include EPS and revenue actuals alongside estimates. Missing values are null. Report times include `bmo` (before open), `dmh` (during market hours), and `amc` (after close).
+- Calendar pages contain up to 100 entries (default 50). Pass `nextOffset` as `offset` with the same filters to continue. At 1,500 fetched rows, Finnhub may have omitted earlier releases. Narrow the window or filter by symbol to check.
 
 ---
 
 ### `finnhub_get_news` <sub>tool</sub>
 
 - `company` requires `symbol` and accepts a date range (default last 7 days). `market` uses `category`: `general`, `forex`, `crypto`, or `merger` (see `finnhub://news-categories`).
-- Returns headline, source, ISO 8601 datetime, summary, and URL, newest first. `limit` (1–100, default 15) caps articles with total and truncation disclosure; company mode without a symbol → `missing_symbol`, international or paid-only symbol → `not_us_or_paid`.
+- Returns plain-text headlines and summaries, source, ISO 8601 timestamp, and URL, newest first. Pages contain up to 100 articles (default 15).
+- Company mode accepts inclusive UTC dates (`YYYY-MM-DD`). Follow `nextOffset` with the same filters for more fetched articles. Finnhub can omit older articles even below 250 results. Check the observed timestamps and query earlier windows for older coverage.
 
 ---
 
 ### `finnhub_get_recommendations` <sub>tool</sub>
 
 - Per-month strong-buy / buy / hold / sell / strong-sell counts, newest first; history depth depends on Finnhub coverage.
-- `limit` (1–24, default 12) caps available rows; raising it cannot retrieve history absent from Finnhub. Reports total months and discloses truncation.
+- `limit` accepts a positive integer (default 12). The response reports the number of months Finnhub supplied and whether more fetched rows were available.
 - Empty result → `no_coverage`; it cannot distinguish an invalid symbol from a valid symbol without coverage. International or paid-only symbol → `not_us_or_paid`.
 
 ---
@@ -117,7 +120,7 @@ Agent-friendly output:
 - Two distinct "not available" signals — `symbol_not_found` (all-zero quote / empty profile sentinel) vs. `not_us_or_paid` (international or paid-only, HTTP 403). An empty profile can also reflect missing instrument coverage.
 - ETFs, funds, or trusts may lack company profiles, earnings history, or analyst recommendations. Empty responses retain ticker verification guidance and suggest `finnhub_get_quote` for price data without promising quote availability.
 - Typed error contracts with recovery hints on every failure, plus the `isLikelyUS` search heuristic so an agent can prioritize likely free-tier symbols
-- Capped lists report their total count and disclose truncation, so an agent knows when more data exists
+- Calendar and company-news pages report the fetched count and observed bounds. Each page refetches Finnhub, so new or revised records can shift between requests.
 
 ## Getting started
 
@@ -173,7 +176,7 @@ See [`.env.example`](./.env.example) for the full list of optional overrides.
 
 ### Local development
 
-Requires [Bun v1.4.0](https://bun.sh/) or higher (or Node.js v24+), and a free [Finnhub API key](https://finnhub.io/register).
+Requires [Bun v1.4.4](https://bun.sh/) or higher (or Node.js v24+), and a free [Finnhub API key](https://finnhub.io/register).
 
 ```sh
 git clone https://github.com/cyanheads/finnhub-mcp-server.git

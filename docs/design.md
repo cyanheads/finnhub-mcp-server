@@ -1,7 +1,7 @@
 # finnhub-mcp-server — Design
 
 **Package:** `@cyanheads/finnhub-mcp-server`
-**Framework:** `@cyanheads/mcp-ts-core` `^0.13.18`
+**Framework:** `@cyanheads/mcp-ts-core` `^0.13.22`
 **Display identity:** `finnhub-mcp-server` (hyphenated machine name everywhere — `createApp` `title`, manifest `display_name`; never Title Case)
 
 ## MCP Surface
@@ -10,11 +10,11 @@
 
 | Name | Description | Key Inputs | Annotations |
 |:-----|:------------|:-----------|:------------|
-| `finnhub_search_symbols` | Resolve a company name or partial ticker to Finnhub stock symbols. The entry point for every other tool — users say "Microsoft", the rest of the surface needs "MSFT". Returns matched symbols with display symbol, description, and security type, best likely-US match first. | `query`, `limit?` | `readOnlyHint`, `openWorldHint` |
+| `finnhub_search_symbols` | Resolve a company name or ticker to Finnhub symbols, exact matches first. | `query`, `limit?`, `exchange?` | `readOnlyHint`, `openWorldHint` |
 | `finnhub_get_quote` | Real-time price quote for one US stock symbol: current, change, %change, open, high, low, previous close. Pairs the quote with live market-status so the response states whether the price is live or the prior close — never implies a stale price is live. Resolve a name to a symbol with `finnhub_search_symbols` first. | `symbol` | `readOnlyHint`, `openWorldHint` |
-| `finnhub_get_company` | Full company context for one US symbol in a single call: profile (name, exchange, industry, country, market cap, shares outstanding, IPO date, website, logo), headline fundamentals (P/E, EPS, 52-week range, beta, dividend yield, margins, growth), and sector peers. Combines three endpoints so "tell me about Apple" needs one tool call, not three. | `symbol` | `readOnlyHint`, `openWorldHint` |
-| `finnhub_get_earnings` | Earnings data in two modes. `history`: a symbol's past quarters — actual vs. estimate EPS, surprise %, period (the surprise is the market-moving signal, surfaced prominently). `calendar`: upcoming releases in a date window — date, EPS/revenue estimates, symbol. `history` requires `symbol`; `calendar` uses `from`/`to` with an optional `symbol` filter. | `mode`, `symbol?`, `from?`, `to?` | `readOnlyHint`, `openWorldHint` |
-| `finnhub_get_news` | Financial news in two modes. `company`: recent articles for one symbol over a date range — headline, source, datetime, summary, URL ("what's driving AAPL today?"). `market`: broad market headlines by category (general, forex, crypto, merger). `company` requires `symbol`; `market` uses `category`. | `mode`, `symbol?`, `from?`, `to?`, `category?` | `readOnlyHint`, `openWorldHint` |
+| `finnhub_get_company` | US company profile, fundamentals, and peers grouped by sub-industry, industry, or sector. | `symbol`, `peerGrouping?` | `readOnlyHint`, `openWorldHint` |
+| `finnhub_get_earnings` | Earnings history or a paged calendar with estimates and reported actuals where available. | `mode`, `symbol?`, `from?`, `to?`, `limit?`, `offset?` | `readOnlyHint`, `openWorldHint` |
+| `finnhub_get_news` | Paged company news for a date window, or market news by category. | `mode`, `symbol?`, `from?`, `to?`, `category?`, `limit?`, `offset?` | `readOnlyHint`, `openWorldHint` |
 | `finnhub_get_recommendations` | Analyst recommendation trends for one US symbol: strong-buy / buy / hold / sell / strong-sell counts per month, newest first. The consensus view to pair with the live quote and fundamentals from `finnhub_get_company`. | `symbol`, `limit?` | `readOnlyHint`, `openWorldHint` |
 
 All six tools are read-only, idempotent in spirit (no `idempotentHint` — upstream data changes between calls so repeated calls legitimately differ), and `openWorldHint: true` (live external API).
@@ -23,7 +23,7 @@ Symbol inputs use Zod's native `.trim().toUpperCase()` checks before handlers ru
 
 ### Error Contracts
 
-Declared inline on each tool as `errors: [{ reason, code, when, recovery }]`, thrown via `ctx.fail(reason, …)`. Baseline codes (`InternalError`, `ServiceUnavailable`, `Timeout`, `ValidationError`, `SerializationError`) bubble automatically and are **not** declared. The three domain failures below recur across the surface because they are properties of the Finnhub free tier, not of any one endpoint.
+Tool definitions declare domain errors with a reason, code, and recovery. Handlers use `ctx.fail` for their own errors and forward declared date-window errors from the shared helper. Framework failures such as `Timeout` and `ServiceUnavailable` propagate through the standard error pipeline.
 
 | Tool | `reason` | Code | When | Recovery |
 |:-----|:---------|:-----|:-----|:---------|
@@ -33,6 +33,9 @@ Declared inline on each tool as `errors: [{ reason, code, when, recovery }]`, th
 | `finnhub_get_company` | `not_us_or_paid` | `Forbidden` | Upstream returned HTTP 403 (international / paid-only symbol) | Free tier is US equities only; international symbols need a paid Finnhub plan. Try the company's US listing. |
 | `finnhub_get_earnings` | `missing_symbol` | `ValidationError` | `mode: 'history'` was requested without a nonblank `symbol` | Provide a `symbol` for history mode, or switch to `mode: 'calendar'` for the market-wide upcoming-releases feed. |
 | `finnhub_get_earnings` | `not_us_or_paid` | `Forbidden` | Upstream HTTP 403 on the symbol | Free tier is US equities only; use a US symbol or a paid plan. |
+| Earnings calendar and company news | `invalid_date` | `ValidationError` | A date bound is not a real `YYYY-MM-DD` date | Use a real date for the identified field. |
+| Earnings calendar and company news | `inverted_date_window` | `ValidationError` | The resolved start follows the end | Choose a start date on or before the end date. |
+| `finnhub_get_earnings` | `calendar_limit_exceeded` | `ValidationError` | Calendar limit exceeds 100 | Use a limit of 100 or less and continue with `nextOffset`. |
 | `finnhub_get_news` | `missing_symbol` | `ValidationError` | `mode: 'company'` was requested without a nonblank `symbol` | Provide a `symbol` for company mode, or switch to `mode: 'market'` with a `category`. |
 | `finnhub_get_news` | `not_us_or_paid` | `Forbidden` | Upstream HTTP 403 on the symbol | Free tier is US equities only; use a US symbol or a paid plan. |
 | `finnhub_get_recommendations` | `no_coverage` | `NotFound` | Endpoint returned an empty array — no analyst coverage for the symbol | Verify the ticker with `finnhub_search_symbols`. ETFs, funds, or trusts may lack analyst coverage, as may thinly-traded or newly-listed stocks; try `finnhub_get_quote` for price data. |
@@ -40,7 +43,7 @@ Declared inline on each tool as `errors: [{ reason, code, when, recovery }]`, th
 
 `finnhub_search_symbols` declares **no** contract — `/search` returns `{count: 0, result: []}` for a no-hit query (HTTP 200), which is an empty success surfaced via `ctx.enrich.notice`, not an error.
 
-The shared `not_us_or_paid` (`Forbidden`/403) and `invalid_key` handling live in the service layer (see Services): the service classifies a 403 into a `Forbidden` McpError and a 401 (`{"error":"Invalid API key."}`) into a `ConfigurationError`-class failure so a misconfigured key fails loudly at the first call rather than masquerading as "no data".
+The service maps HTTP 403 to `Forbidden`. Tools that declare `not_us_or_paid` add that reason where the rejected request concerns a symbol. The service maps HTTP 401 to `ConfigurationError` so callers can distinguish invalid credentials from an empty result.
 
 ### Resources
 
@@ -95,7 +98,7 @@ The Finnhub free tier (60 req/min, US real-time) was probed directly with the pr
 - Resolve a company name or partial ticker to a US stock symbol (entry point for the whole surface).
 - Real-time quote for a US symbol that **states market-open vs. prior-close** rather than implying a stale price is live.
 - Single-call company context: profile + fundamentals + peers.
-- Earnings: historical actual-vs-estimate surprises for a symbol, and an upcoming-releases calendar with an optional symbol filter.
+- Earnings history provides quarterly EPS surprises. The calendar includes estimates and available reported EPS and revenue for a date window, optionally filtered by symbol.
 - Financial news: per-company over a date range, and market-wide by category.
 - Analyst recommendation consensus for a symbol.
 - A **clear domain error for international / paid-only symbols** (HTTP 403) — never a silent empty result.
@@ -158,52 +161,16 @@ Both `server.json` (`environmentVariables[]`) and `manifest.json` (`mcp_config.e
 
 ## Tool Designs
 
-Notation: input/output are Zod sketches; every field carries a `.describe()` in the build. Enrichment fields are **optional in the output-extension** unless marked required — the framework only populates truncation fields when the cap is hit, and declaring them required throws `-32007` on every non-truncated result (the standing capped-list rule).
+Tool definitions specify the input and output schemas. List tools disclose `totalCount`, with optional `truncated`, `shown`, and `cap` fields for local truncation.
 
 ### 1. `finnhub_search_symbols`
 
-**Workflow:** "Find Microsoft's ticker" / "what's the symbol for Shopify?" — the resolver every other tool depends on.
+[Tool definition](../src/mcp-server/tools/definitions/search-symbols.tool.ts). Wraps `GET /search`.
 
-**Wraps:** `GET /search?q={query}`.
-
-```ts
-input: z.object({
-  query: z.string().min(1).max(20, {
-    message: 'Finnhub search queries are limited to 20 characters. Use a shorter company name or ticker fragment.',
-  }).describe(
-    'Company name (e.g., "Apple"), partial name ("micro"), or ticker fragment, up to 20 characters. Finnhub full-text matches across symbols and descriptions. Use this first when you have a company name, not a ticker — the rest of the tools need a symbol.',
-  ),
-  limit: z.number().int().min(1).max(50).default(10).describe(
-    'Max symbols to return (Finnhub often returns 10–50 matches for a common word). Default 10. Likely-US Common Stock matches are surfaced first.',
-  ),
-}),
-
-output: z.object({
-  results: z.array(z.object({
-    symbol: z.string().describe('Finnhub symbol — pass this to finnhub_get_quote / _company / _earnings / _news / _recommendations.'),
-    displaySymbol: z.string().describe('Human-facing ticker as shown on its exchange (e.g., "AAPL", "603020.SS").'),
-    description: z.string().describe('Company / security name.'),
-    type: z.string().describe('Security type (e.g., "Common Stock", "ETP", "ETF"). Empty string when Finnhub omits it.'),
-    isLikelyUS: z.boolean().describe('Symbol-format heuristic for likely US free-tier availability. Plain tickers and `.A`/`.B` class-share symbols are likely US; recognized exchange suffixes such as `.SS`, `.T`, and `.L` are not. Quote and profile responses remain authoritative.'),
-  })).describe('Matched symbols, likely-US Common Stock first, then by Finnhub order.'),
-}),
-
-enrichment: {
-  totalCount: z.number().describe('Total matches Finnhub reported (its `count`), before the limit.'),
-  notice: z.string().optional().describe('Guidance when nothing matched.'),
-},
-```
-
-**Handler flow:**
-1. `service.search(input.query)` → `{ count, result[] }`.
-2. Map each `result` to the output object. Compute `isLikelyUS` from a symbol-format heuristic: plain symbols and alphabetic `.A`/`.B` class shares are likely US; other dotted symbols are not. The flag guides ranking but does not guarantee endpoint availability.
-3. Stable sort: likely-US Common Stock (`isLikelyUS && type === 'Common Stock'`) first, preserving Finnhub order within groups. ETFs and ETPs keep Finnhub's rank.
-4. `ctx.enrich.total(count)`. If `count === 0`, `ctx.enrich.notice('No symbols matched "<query>". Try the company's common name or a ticker fragment.')`.
-5. Slice to `limit` and return.
-
-**Capped-list disclosure:** `totalCount` (required enrichment) satisfies the rule; when `count > limit` also call `ctx.enrich.truncated({ shown: limit, cap: limit })` so the agent knows more exist. `truncated`/`shown`/`cap` are **optional** in the enrichment extension.
-
-`format()`: a markdown list — `**AAPL** — Apple Inc (Common Stock, likely US (symbol heuristic))` per row, with the total and any notice in the enrichment trailer.
+- Send the 1–20-character query unchanged. Trim and uppercase a supplied exchange and echo it on both response surfaces, including an empty result. Blank or omitted exchange searches globally.
+- Rank case-insensitive exact matches against `symbol` or `displaySymbol` first, then likely-US Common Stock, then other rows. Preserve Finnhub order within each group and apply the limit after ranking.
+- `isLikelyUS` recognizes plain tickers and alphabetic `.A`/`.B` class shares. Quote and profile responses determine availability. Exchange filtering can exclude listings a ticker query would find.
+- `totalCount` is Finnhub's reported count. Zero matches are a success with guidance.
 
 ### 2. `finnhub_get_quote`
 
@@ -251,228 +218,39 @@ errors: [
 
 ### 3. `finnhub_get_company`
 
-**Workflow:** "Tell me about Apple" — profile is hollow without the valuation numbers, so this is deliberately one tool over three.
+[Tool definition](../src/mcp-server/tools/definitions/get-company.tool.ts). Fetches profile, fundamentals, and peers concurrently.
 
-**Wraps:** `GET /stock/profile2` + `GET /stock/metric?metric=all` + `GET /stock/peers` — `Promise.allSettled` fan-out. Profile is the spine (its 403/empty drives the error); metrics and peers degrade to partial on failure.
-
-```ts
-input: z.object({
-  symbol: z.string().trim().toUpperCase().min(1).describe(
-    'US stock ticker (e.g., "AAPL"). Resolve a company name with finnhub_search_symbols first. International symbols are not on the free tier.',
-  ),
-}),
-
-output: z.object({
-  symbol: z.string().describe('The symbol queried, trimmed and uppercased.'),
-  profile: z.object({
-    name: z.string().describe('Company name.'),
-    exchange: z.string().describe('Listing exchange (e.g., "NASDAQ NMS - GLOBAL MARKET").'),
-    industry: z.string().describe('Finnhub industry classification.'),
-    country: z.string().describe('Country code (e.g., "US").'),
-    currency: z.string().describe('Reporting currency.'),
-    marketCapitalization: z.number().nullable().describe('Market cap in millions of `currency`. Null when omitted.'),
-    shareOutstanding: z.number().nullable().describe('Shares outstanding in millions. Null when omitted.'),
-    ipo: z.string().nullable().describe('IPO date (YYYY-MM-DD). Null when omitted.'),
-    weburl: z.string().nullable().describe('Company website. Null when omitted.'),
-    logo: z.string().nullable().describe('Logo image URL. Null when omitted.'),
-  }).describe('Company profile from /stock/profile2.'),
-  fundamentals: z.object({
-    peTTM: z.number().nullable().describe('Price/earnings, trailing twelve months.'),
-    epsTTM: z.number().nullable().describe('Earnings per share, TTM.'),
-    week52High: z.number().nullable().describe('52-week high price.'),
-    week52Low: z.number().nullable().describe('52-week low price.'),
-    beta: z.number().nullable().describe('Beta vs. the market.'),
-    dividendYieldTTM: z.number().nullable().describe('Current dividend yield %, TTM.'),
-    netProfitMarginTTM: z.number().nullable().describe('Net profit margin %, TTM.'),
-    grossMarginTTM: z.number().nullable().describe('Gross margin %, TTM.'),
-    revenueGrowthTTMYoy: z.number().nullable().describe('Revenue growth % YoY, TTM.'),
-    roeTTM: z.number().nullable().describe('Return on equity %, TTM.'),
-  }).describe('Headline fundamentals from /stock/metric (a curated subset of ~100 available metrics). Every field nullable — Finnhub omits metrics for thinly-covered names.'),
-  peers: z.array(z.string()).describe('Sector peer symbols from /stock/peers (includes the queried symbol). Empty when none.'),
-  partial: z.array(z.string()).optional().describe('Names of the sub-fetches that failed (e.g., ["metrics"]) when the call partially degraded. Absent on a full success.'),
-}),
-
-errors: [
-  { reason: 'symbol_not_found', code: NotFound, when: '/stock/profile2 returned an empty object',
-    recovery: 'Verify the ticker with finnhub_search_symbols. ETFs, funds, or trusts may lack company profiles; try finnhub_get_quote for price data.' },
-  { reason: 'not_us_or_paid', code: Forbidden, when: 'Upstream HTTP 403 — international or paid-only symbol',
-    recovery: 'Free tier is US equities only; international symbols need a paid Finnhub plan. Try the US listing.' },
-],
-```
-
-**Handler flow:**
-1. `Promise.allSettled([service.profile(symbol), service.metrics(symbol), service.peers(symbol)])`.
-2. Profile leg drives errors: a 403 rejection → `ctx.fail('not_us_or_paid')`; a fulfilled-but-`{}` profile (verified empty-object response for unknown symbols) → `ctx.fail('symbol_not_found')`.
-3. Pick the curated fundamentals subset from `metric` (keys verified present on a live `metric=all` pull: `peTTM`, `epsTTM`, `52WeekHigh`, `52WeekLow`, `beta`, `currentDividendYieldTTM`, `netProfitMarginTTM`, `grossMarginTTM`, `revenueGrowthTTMYoy`, `roeTTM`). Every field maps through `?? null` — never fabricate a missing metric.
-4. `peers` from the peers leg (already a string array) or `[]`.
-5. `partial = [legs that rejected]`; omit the field entirely when all three fulfilled.
-
-**Sparsity rule (framework checklist):** fundamentals are all-nullable by design — a thinly-covered small-cap returns a populated profile with a near-empty metric block, and the tool must surface that honestly rather than zero-filling. `format()` and the test suite both include a sparse-symbol case.
-
-`format()`: a profile header, a fundamentals table (omit rows that are null), a peers line, and a `⚠ partial: metrics unavailable` note when `partial` is set.
+- The profile determines call success. Empty profiles and HTTP 403 surface the declared errors. Mark unavailable metrics or peers in `partial` and retain successful data.
+- Missing numeric metrics remain null. The peers array can include the queried symbol.
+- Omit Finnhub's `grouping` for `peerGrouping: 'subIndustry'`, the default. Send `industry` or `sector` verbatim when selected. Echo the choice on both response surfaces, including partial results.
 
 ### 4. `finnhub_get_earnings`
 
-**Workflow:** "Has Apple been beating estimates?" (`history`) / "Who reports next week?" (`calendar`). Mode-consolidated because both are the same noun (earnings) from two angles.
+[Tool definition](../src/mcp-server/tools/definitions/get-earnings.tool.ts). History uses `GET /stock/earnings`. Calendar uses `GET /calendar/earnings` with an optional symbol filter.
 
-**Wraps:** `mode: 'history'` → `GET /stock/earnings?symbol={symbol}`; `mode: 'calendar'` → `GET /calendar/earnings?from={from}&to={to}` with optional `symbol`.
-
-```ts
-input: z.object({
-  mode: z.enum(['history', 'calendar']).describe(
-    "'history' = one symbol's past quarters with actual-vs-estimate surprises (requires `symbol`). 'calendar' = upcoming releases in a date window, optionally filtered by `symbol` (uses `from`/`to`).",
-  ),
-  symbol: z.string().trim().toUpperCase().optional().describe('Required for `history`; optionally filters `calendar` mode. US ticker. Resolve a name with finnhub_search_symbols first.'),
-  from: z.string().optional().describe('Calendar mode: window start (YYYY-MM-DD). Defaults to today when omitted.'),
-  to: z.string().optional().describe('Calendar mode: window end (YYYY-MM-DD). Defaults to today + 14 days when omitted.'),
-  limit: z.number().int().min(1).max(100).default(50).describe('Max rows returned (history quarters or calendar entries). Default 50.'),
-}),
-
-output: z.object({
-  mode: z.enum(['history', 'calendar']).describe('The mode used (echo of input).'),
-  history: z.array(z.object({
-    period: z.string().describe('Fiscal period end (YYYY-MM-DD).'),
-    year: z.number().describe('Fiscal year.'),
-    quarter: z.number().describe('Fiscal quarter (1–4).'),
-    actualEPS: z.number().nullable().describe('Reported EPS. Null if not yet reported.'),
-    estimateEPS: z.number().nullable().describe('Consensus estimate EPS.'),
-    surprise: z.number().nullable().describe('actual − estimate (absolute).'),
-    surprisePercent: z.number().nullable().describe('Surprise as % of estimate — the market-moving signal. Positive = beat, negative = miss.'),
-  })).optional().describe('Present in `history` mode. Newest quarter first.'),
-  calendar: z.array(z.object({
-    symbol: z.string().describe('Stock ticker.'),
-    date: z.string().describe('Expected report date (YYYY-MM-DD).'),
-    hour: z.string().describe('"bmo" (before open) / "amc" (after close) / "" when unknown.'),
-    epsEstimate: z.number().nullable().describe('Consensus EPS estimate. Null for distant future dates or uncovered symbols.'),
-    revenueEstimate: z.number().nullable().describe('Consensus revenue estimate in the reporting currency. Null when unavailable.'),
-    year: z.number().describe('Fiscal year.'),
-    quarter: z.number().describe('Fiscal quarter (1–4).'),
-  })).optional().describe('Present in `calendar` mode. Sorted by date. Note: `epsActual` and `revenueActual` are not surfaced here — this tool is for the upcoming-releases workflow; actuals are available in `history` mode for a specific symbol.'),
-}),
-
-enrichment: {
-  totalCount: z.number().describe('Total rows available before the limit.'),
-  truncated: z.boolean().optional(),
-  shown: z.number().optional(),
-  cap: z.number().optional(),
-  notice: z.string().optional().describe('Guidance when the result set is empty.'),
-},
-
-errors: [
-  { reason: 'missing_symbol', code: ValidationError, when: "mode 'history' without a nonblank symbol",
-    recovery: 'Provide a `symbol` for history mode, or switch to mode: calendar for the market-wide feed.' },
-  { reason: 'not_us_or_paid', code: Forbidden, when: 'Upstream HTTP 403 on the symbol',
-    recovery: 'Free tier is US equities only; use a US symbol or a paid plan.' },
-],
-```
-
-**Handler flow:**
-1. `mode === 'history'`: require `symbol` (else `ctx.fail('missing_symbol')`); `service.earnings(symbol)` → array, newest first; map to `history[]`.
-2. `mode === 'calendar'`: default `from`/`to` (today, +14d); `service.earningsCalendar(from, to, symbol || undefined)` → `{ earningsCalendar[] }`; map to `calendar[]`. An omitted or blank symbol requests the market-wide feed. (Verified: free; `epsActual`/`epsEstimate` are commonly `null` for distant dates — surfaced honestly.)
-3. `ctx.enrich.total(rows.length)`; slice to `limit`; if sliced, `ctx.enrich.truncated({ shown: limit, cap: limit })`. Empty → `ctx.enrich.notice(...)`.
-
-The two output arrays are a discriminated-by-`mode` pair; only one is populated. `format()` renders whichever is present (a surprise-% column for history, a date/symbol list for calendar).
-
-Empty history is a successful result with conditional guidance: verify the ticker with `finnhub_search_symbols`; ETFs, funds, or trusts may lack earnings history, and `finnhub_get_quote` is an alternative for price data. Empty profile/history/recommendation responses cannot establish instrument type or distinguish an invalid ticker from missing coverage. Guidance adds no upstream requests and does not guarantee a quote.
+- History requires a symbol and ignores calendar dates and offset. Its limit defaults to 50 and accepts larger positive integers. Empty history succeeds with ticker and coverage guidance.
+- Calendar defaults to today through 14 days ahead in UTC. Resolve and validate the bounds with the [date-window helper](../src/services/finnhub/date-window.ts) before fetching. Omitted or blank symbol requests the market-wide feed.
+- Calendar rows carry nullable EPS and revenue estimates and actuals. Preserve zero and `hour: "dmh"` for releases during market hours.
+- Sort calendar rows by date then symbol with deterministic ties, then page with a zero-based offset. The limit defaults to 50 with a maximum of 100.
+- Fetched bounds show the earliest and latest dates in the full upstream response. At 1,500 rows or more, warn that Finnhub may omit releases.
 
 ### 5. `finnhub_get_news`
 
-**Workflow:** "What's driving AAPL today?" (`company`) / "Top market headlines" (`market`).
+[Tool definition](../src/mcp-server/tools/definitions/get-news.tool.ts). Company mode uses `GET /company-news`. Market mode uses `GET /news`.
 
-**Wraps:** `mode: 'company'` → `GET /company-news?symbol={symbol}&from={from}&to={to}`; `mode: 'market'` → `GET /news?category={category}`.
+- Company mode requires a symbol and defaults to the UTC window from seven days ago through today. Validate dates before fetching. Page after sorting newest first with deterministic ties.
+- Company-news bounds show the earliest and latest timestamps among all fetched articles. Nonempty responses carry a caveat because even shorter responses can omit older articles.
+- Market mode keeps its category-based request and newest-first local limit. An article's category tag may differ from the requested category. Both modes default to limit 15 with a maximum of 100.
+- Normalize headline and summary text with the [article text helper](../src/services/finnhub/normalize-article-text.ts). Decode entities and preserve literal text and paragraph and list boundaries. Both response surfaces carry normalized text and the article URL.
 
-```ts
-input: z.object({
-  mode: z.enum(['company', 'market']).describe(
-    "'company' = recent articles for one symbol over a date range (requires `symbol`). 'market' = broad headlines by `category`.",
-  ),
-  symbol: z.string().trim().toUpperCase().optional().describe('Required for `company` mode. US ticker. Ignored in `market` mode.'),
-  from: z.string().optional().describe('Company mode: window start (YYYY-MM-DD). Defaults to today − 7 days.'),
-  to: z.string().optional().describe('Company mode: window end (YYYY-MM-DD). Defaults to today.'),
-  category: z.enum(['general', 'forex', 'crypto', 'merger']).default('general').describe('Market mode: news category. See finnhub://news-categories.'),
-  limit: z.number().int().min(1).max(100).default(15).describe('Max articles (1–100). Default 15 — news lists run long; keep context lean.'),
-}),
-
-output: z.object({
-  mode: z.enum(['company', 'market']).describe('The mode used (echo of input).'),
-  articles: z.array(z.object({
-    headline: z.string().describe('Article headline.'),
-    source: z.string().describe('Publisher name.'),
-    datetime: z.string().describe('Publish time, ISO 8601 (from Finnhub `datetime` epoch).'),
-    summary: z.string().describe('Article summary (may be empty).'),
-    url: z.string().describe('Link to the article.'),
-    category: z.string().optional().describe('Finnhub category tag (market mode). Note: the response category may differ from the requested category (e.g., "business" for a "general" request).'),
-    related: z.string().optional().describe('Related symbol(s) Finnhub tagged.'),
-  })).describe('Articles, newest first.'),
-}),
-
-enrichment: {
-  totalCount: z.number().describe('Total articles available before the limit.'),
-  truncated: z.boolean().optional(),
-  shown: z.number().optional(),
-  cap: z.number().optional(),
-  notice: z.string().optional(),
-},
-
-errors: [
-  { reason: 'missing_symbol', code: ValidationError, when: "mode 'company' without a nonblank symbol",
-    recovery: 'Provide a `symbol` for company mode, or switch to mode: market with a category.' },
-  { reason: 'not_us_or_paid', code: Forbidden, when: 'Upstream HTTP 403 on the symbol',
-    recovery: 'Free tier is US equities only; use a US symbol or a paid plan.' },
-],
-```
-
-**Handler flow:**
-1. `company`: require `symbol`; default the 7-day window; `service.companyNews(symbol, from, to)` → array.
-2. `market`: `service.marketNews(category)` → array.
-3. Convert `datetime` epochs → ISO; sort newest first; `ctx.enrich.total(len)`; slice to `limit` with truncation disclosure; empty → notice.
-
-`format()`: `**<headline>** — <source>, <date>` per article with the URL, total/truncation in the trailer.
+The [paging helper](../src/mcp-server/tools/definitions/window-page.ts) shared with earnings calendar reports the fetched count, observed `fetchedFrom` and `fetchedTo`, and `nextOffset` while fetched rows remain. Continuation includes any upstream warning. Each page refetches Finnhub, so the result set can shift. An empty response has no fetched bounds. An offset at or beyond the fetched count has no next page.
 
 ### 6. `finnhub_get_recommendations`
 
-**Workflow:** "What do analysts think of Apple?" — the consensus layer beside the quote and fundamentals. This is the slot the dropped `finnhub_get_candles` vacated; it is genuinely free-tier and genuinely useful.
+[Tool definition](../src/mcp-server/tools/definitions/get-recommendations.tool.ts). Wraps `GET /stock/recommendation`.
 
-**Wraps:** `GET /stock/recommendation?symbol={symbol}`.
-
-```ts
-input: z.object({
-  symbol: z.string().trim().toUpperCase().min(1).describe('US stock ticker (e.g., "AAPL"). Resolve a name with finnhub_search_symbols first.'),
-  limit: z.number().int().min(1).max(24).default(12).describe('Maximum months to return from available upstream history, newest first (1–24, default 12). Increasing the limit returns more available rows, not history absent from Finnhub.'),
-}),
-
-output: z.object({
-  symbol: z.string().describe('The symbol queried, trimmed and uppercased.'),
-  trends: z.array(z.object({
-    period: z.string().describe('Month the consensus is for (YYYY-MM-DD, first of month).'),
-    strongBuy: z.number().describe('Number of analysts with a Strong Buy rating this month.'),
-    buy: z.number().describe('Number of analysts with a Buy rating this month.'),
-    hold: z.number().describe('Number of analysts with a Hold rating this month.'),
-    sell: z.number().describe('Number of analysts with a Sell rating this month.'),
-    strongSell: z.number().describe('Number of analysts with a Strong Sell rating this month.'),
-  })).describe('Recommendation counts per month, newest first. History depth depends on Finnhub coverage.'),
-}),
-
-errors: [
-  { reason: 'no_coverage', code: NotFound, when: 'Endpoint returned an empty array — no analyst coverage',
-    recovery: 'Verify the ticker with finnhub_search_symbols. ETFs, funds, or trusts may lack analyst coverage, as may thinly-traded or newly-listed stocks; try finnhub_get_quote for price data.' },
-  { reason: 'not_us_or_paid', code: Forbidden, when: 'Upstream HTTP 403',
-    recovery: 'Free tier is US equities only; use a US symbol or a paid plan.' },
-],
-
-enrichment: {
-  totalCount: z.number().describe('Total months available before the limit.'),
-  truncated: z.boolean().optional(),
-  shown: z.number().optional(),
-  cap: z.number().optional(),
-},
-```
-
-**Handler flow:** `service.recommendations(symbol)` → array; empty → `ctx.fail('no_coverage')`; sort newest first; `ctx.enrich.total(all.length)`; slice to `limit`; if sliced, `ctx.enrich.truncated({ shown: limit, cap: limit })`; return.
-
-**Capped-list disclosure:** `totalCount` required; `truncated`/`shown`/`cap` are `.optional()` in enrichment extension — framework only sets them when the cap is hit.
-
-`format()`: a per-month table (`2026-06: 14 strong-buy / 24 buy / 15 hold / 2 sell / 0 strong-sell`), with total/truncation in the enrichment trailer.
+- Return monthly rating counts, newest first. The local limit defaults to 12 and accepts larger positive integers. Upstream history depth varies by symbol.
+- Empty upstream rows produce `no_coverage` with ticker verification guidance and the quote tool as an option for price data.
 
 ---
 
@@ -493,7 +271,7 @@ Only `finnhub_get_quote` and `finnhub_get_company` make multiple upstream calls;
 |:--|:-----|:--------|:-----------|
 | 1 | `GET /stock/profile2?symbol={s}` | Profile (spine) | 403 → `not_us_or_paid`; `{}` → `symbol_not_found` |
 | 2 | `GET /stock/metric?symbol={s}&metric=all` | Fundamentals | degrade: `fundamentals` all-null, add `partial: ['metrics']` |
-| 3 | `GET /stock/peers?symbol={s}` | Sector peers | degrade: `peers: []`, add `partial: ['peers']` |
+| 3 | `GET /stock/peers?symbol={s}` with optional `grouping` | Selected peer group | `peers: []` and `partial` includes `'peers'` |
 
 The fan-out is why the per-company call costs 3 of the 60/min budget — fine for conversational use, documented as tight for bulk (Known Limitations).
 
@@ -518,19 +296,19 @@ The fan-out is why the per-company call costs 3 of the 60/min budget — fine fo
 
 | Endpoint | Params | Response shape (verified 2026-06-13) |
 |:---------|:-------|:-------------------------------------|
-| `GET /search` | `q` | `{ count, result: [{ symbol, displaySymbol, description, type }] }` |
+| `GET /search` | `q`, optional `exchange` | `{ count, result: [{ symbol, displaySymbol, description, type }] }` |
 | `GET /quote` | `symbol` | `{ c, d, dp, h, l, o, pc, t }` — `c`=current, `d`=change, `dp`=%chg, `h`=session high, `l`=low, `o`=open, `pc`=prev close, `t`=epoch (Unix seconds). **Unknown symbol → all-zero/null at HTTP 200: `{c:0,d:null,dp:null,h:0,l:0,o:0,pc:0,t:0}`.** |
 | `GET /stock/market-status` | `exchange=US` | `{ exchange, holiday, isOpen, session, t, timezone }` |
 | `GET /stock/profile2` | `symbol` | `{ ticker, name, country, currency, exchange, ipo, marketCapitalization, shareOutstanding, logo, weburl, finnhubIndustry, ... }` — **unknown symbol → `{}`.** |
 | `GET /stock/metric` | `symbol`, `metric=all` | `{ metric: { peTTM, epsTTM, 52WeekHigh, 52WeekLow, beta, currentDividendYieldTTM, netProfitMarginTTM, grossMarginTTM, revenueGrowthTTMYoy, roeTTM, ...~100 keys }, metricType, series, symbol }` |
-| `GET /stock/peers` | `symbol` | `["AAPL","DELL",...]` (includes the queried symbol) |
+| `GET /stock/peers` | `symbol`, optional `grouping` (`industry` or `sector`) | Array of peer symbols. Default: sub-industry. |
 | `GET /stock/earnings` | `symbol` | `[{ actual, estimate, period, quarter, surprise, surprisePercent, symbol, year }]` |
 | `GET /calendar/earnings` | `from`, `to`, optional `symbol` | `{ earningsCalendar: [{ date, epsActual, epsEstimate, hour, quarter, revenueActual, revenueEstimate, symbol, year }] }` (estimates often null for distant dates) |
 | `GET /company-news` | `symbol`, `from`, `to` | `[{ category, datetime, headline, id, image, related, source, summary, url }]` |
 | `GET /news` | `category` | same article shape as company-news |
 | `GET /stock/recommendation` | `symbol` | `[{ symbol, period, strongBuy, buy, hold, sell, strongSell }]` — **empty array when no coverage.** |
 
-**Error envelopes:** `403 {"error":"You don't have access to this resource."}` (international/paid) · `401 {"error":"Invalid API key."}` · `429` (rate limit). All errors are a flat `{ error: string }` with no code field — classify on HTTP status.
+Classify failures by HTTP status. Finnhub can return a JSON `error` message for HTTP 401 or 403 and an HTML response for HTTP 429.
 
 ---
 
@@ -548,9 +326,9 @@ The fan-out is why the per-company call costs 3 of the 60/min budget — fine fo
 
 **International-symbol error is the generic 403, surfaced as `not_us_or_paid`.** Probe confirmed `SHOP.TO` and `SAP.DE` return the *same* 403 as paywalled endpoints — Finnhub doesn't distinguish "international" from "paid feature" at the wire. So one `Forbidden` reason covers both, with a recovery hint that names the real fix (use the US listing / a paid plan). `finnhub_search_symbols` exposes `isLikelyUS` as a ranking heuristic: plain tickers and `.A`/`.B` class shares are likely US, while recognized exchange suffixes are not. Endpoint responses remain authoritative.
 
-**Mode consolidation on earnings and news.** Both nouns have two natural angles (history/calendar, company/market) sharing most of the response shape and all of the service wiring. One tool with a `mode` enum tightens the surface from four tools to two without diverging error semantics (the only mode-specific error is `missing_symbol`, declared once per tool). Quote/company/recommendations stay single-purpose — no second mode earns its place.
+**Mode consolidation on earnings and news.** History and calendar share an earnings tool. Company and market news share a news tool and article shape. Date validation and paging apply to the modes that query an upstream date window.
 
-**No DataCanvas.** Every tool returns either a single record (quote, company) or a short, capped, categorical list (search hits, news, earnings rows, recommendation months) — discovery/drill-in shape, not analytical-SQL shape. The capped-list + enrichment-truncation pattern covers the lists; nothing here is something an agent would `GROUP BY`. (Candles would be — deferred with the candle tool.) Per the design skill's gate: canvas earns its keep on *shape, not size*, and emitting a `canvas_id` without a `dataframe_query` tool is dead output. Skip.
+**No DataCanvas.** The tools return individual records and lists for lookup and comparison. Calendar and company-news callers can page through fetched records. Earnings history and recommendations return up to the requested number of available rows. None of these workflows requires a SQL interface.
 
 **No MirrorService.** Finnhub is a live-data API queried for *current* state — the whole point is freshness. There is no bounded corpus queried-far-more-than-it-changes to mirror; quotes, news, and recommendations change continuously. The live API is the only correct data path.
 
@@ -575,28 +353,7 @@ The fan-out is why the per-company call costs 3 of the 60/min budget — fine fo
 
 ## Services (detail)
 
-| Module | Type | Purpose | Used By |
-|:-------|:-----|:--------|:--------|
-| `FinnhubService` | Service | Auth'd, rate-aware, status-classifying HTTP client for all Finnhub endpoints | All tools |
-
-```ts
-class FinnhubService {
-  // each method: fetchWithTimeout + withRetry, token appended, status classified
-  search(q: string): Promise<FinnhubSearchResponse>
-  quote(symbol: string): Promise<FinnhubQuote>
-  marketStatus(exchange: string): Promise<FinnhubMarketStatus>
-  profile(symbol: string): Promise<FinnhubProfile | Record<string, never>>  // {} for unknown
-  metrics(symbol: string): Promise<FinnhubMetricResponse>
-  peers(symbol: string): Promise<string[]>
-  earnings(symbol: string): Promise<FinnhubEarning[]>
-  earningsCalendar(from: string, to: string, symbol?: string): Promise<FinnhubEarningsCalendar>
-  companyNews(symbol: string, from: string, to: string): Promise<FinnhubNewsArticle[]>
-  marketNews(category: string): Promise<FinnhubNewsArticle[]>
-  recommendations(symbol: string): Promise<FinnhubRecommendation[]>
-}
-```
-
-Typed raw shapes (`types.ts`) mirror the API Reference table. The service returns raw upstream shapes; tools normalize (epoch→ISO, parallel-array→objects is N/A here since no endpoint returns parallel arrays on the free tier, curated field subsets, sentinel→error). Resilience config: `withRetry` base ~1s (rate-limit-calibrated), `fetchWithTimeout` default; 403/401 are non-retryable (classified and thrown), 429/5xx/network are retryable.
+[FinnhubService](../src/services/finnhub/finnhub-service.ts) owns upstream requests and status classification. [Raw types](../src/services/finnhub/types.ts) model the upstream response shapes. The tools normalize and paginate the responses.
 
 ---
 
@@ -616,48 +373,10 @@ Each step independently testable. Steps 3–8 parallelize once the service is so
 
 ---
 
-## Review pass
+## Upstream contract checks
 
-**Date:** 2026-06-13. Independent review against the live Finnhub API (provisioned key). All probes were real API calls; no claims fabricated.
+The June 2026 free-tier checks established the endpoint coverage listed above, the quote and profile sentinels, the US market-status and company-context payloads, and the empty recommendation array.
 
-### Validated correct (no changes needed)
+Finnhub symbol lookup returns different sets with and without `exchange=US`. Global SPY, TM, and BABA searches list the exact ETP or ADR first. The default peers call yields the sub-industry group, with a distinct sector set for AAPL and a distinct industry set for MSFT.
 
-- All 11 free-tier endpoints confirmed accessible (200) and all 4 paid/international endpoints confirmed 403 — the cut of `/stock/candle` and `/forex/rates` is sound.
-- `/stock/market-status?exchange=US` returns `{ exchange, holiday, isOpen, session, t, timezone }` — design matches.
-- `/stock/profile2` returns `{}` for unknown symbols — sentinel detection is correct.
-- `/quote` bogus-symbol sentinel is `{c:0,d:null,dp:null,h:0,l:0,o:0,pc:0,t:0}` at HTTP 200 — sentinel condition `c===0 && t===0` is correct.
-- All 10 curated metric keys (`peTTM`, `epsTTM`, `52WeekHigh`, `52WeekLow`, `beta`, `currentDividendYieldTTM`, `netProfitMarginTTM`, `grossMarginTTM`, `revenueGrowthTTMYoy`, `roeTTM`) present and populated for AAPL.
-- `/stock/peers` returns a plain string array including the queried symbol — design matches.
-- `/stock/earnings` returns `[{ actual, estimate, period, quarter, surprise, surprisePercent, symbol, year }]` — matches the design's raw shape.
-- `/calendar/earnings` wraps results in `{ earningsCalendar: [...] }` — design's service method signature is correct.
-- `/stock/recommendation` returns `[{ symbol, period, strongBuy, buy, hold, sell, strongSell }]` — design matches.
-- Auth: `?token=<key>` on every request — confirmed.
-- 401 envelope: `{"error":"Invalid API key."}` — matches.
-- 403 envelope: `{"error":"You don't have access to this resource."}` at HTTP 403 — matches.
-- Identity: `createApp({ name, title })` only; no `description`/`websiteUrl` duplication — correct.
-- Capped-list `-32007` rule: all capped-list tools declare `truncated`/`shown`/`cap` as `.optional()` — confirmed across all 4 tools with limits.
-
-### Changes made
-
-1. **API Reference table — `dp` was missing from the quote field list.** The table showed `{ c, d, h, l, o, pc, t }` but the live response has `dp` as a distinct field (percent change). Added `dp` explicitly and expanded the field annotation with full field name semantics.
-
-2. **Quote output schema — added raw field name hints to `change` and `percentChange`.** Added `(raw field: \`d\`)` and `(raw field: \`dp\`)` to the `.describe()` text so the implementer maps the right source field. Also noted that `d`/`dp` are null (not zero) in the all-zero sentinel.
-
-3. **All-zero sentinel description updated.** The error contract table and handler flow now both correctly note the sentinel shape as `c=0, t=0, d=null, dp=null` — the `d`/`dp` null detail matters for a robust implementation that checks more than just `c` and `t`.
-
-4. **`finnhub_get_recommendations` — `limit` input.** `limit: z.number().int().min(1).max(24).default(12)` caps rows from the history Finnhub supplies, newest first. Available depth varies by coverage; raising the local cap cannot retrieve absent upstream history. The enrichment block (`totalCount`, `truncated?`, `shown?`, `cap?`) discloses available and returned rows.
-
-5. **Missing `.describe()` on output fields — systematic fix.** The framework checklist requires `.describe()` on every field. Fixed:
-   - `finnhub_get_recommendations` output: `symbol`, `strongBuy`, `buy`, `hold`, `sell`, `strongSell`, `trends` array description updated.
-   - `finnhub_get_earnings` history: `year`, `quarter`; clarified `surprise` as "absolute".
-   - `finnhub_get_earnings` calendar: `symbol`, `epsEstimate`, `revenueEstimate`, `year`, `quarter`; added note that `epsActual`/`revenueActual` are intentionally omitted (upstream has them; design is upcoming-releases focused).
-   - `finnhub_get_news` output: `mode`, `headline`, `source`; added note that response `category` tag may differ from the requested category (observed: `"business"` returned for `"general"` request).
-   - `finnhub_get_company` output: top-level `symbol`.
-
-6. **`finnhub_get_recommendations` error recovery.** `no_coverage` preserves ticker verification and conditionally explains that ETFs, funds, trusts, thinly-traded or newly-listed stocks may lack analyst coverage. `finnhub_get_quote` is an alternative for price data; an empty recommendation response alone does not identify the instrument or establish ticker validity.
-
-### Not added (deliberate cuts validated)
-
-- **`epsActual`/`revenueActual` in calendar output**: the upstream `earningsCalendar` response includes these fields, but they are always null for upcoming events (the calendar's purpose). The design omits them intentionally. Added a note in the output schema describing this so the implementer doesn't add them reflexively.
-- **No DataCanvas**: confirmed correct — all output shapes are discovery/drill-in (categorical lists, single records), not analytical. Nothing here is something an agent would GROUP BY.
-- **No additional tools**: probed `/news-sentiment` — 403. No other free-tier endpoints that would add material value beyond the six confirmed tools.
+Calendar and company news can return partial date coverage. The calendar can reach a 1,500-row ceiling, and a company-news query can omit older articles below 250 rows. Compare wide requests to narrower ones when validating coverage. Company news can include encoded entities, and market news can include HTML paragraphs.
