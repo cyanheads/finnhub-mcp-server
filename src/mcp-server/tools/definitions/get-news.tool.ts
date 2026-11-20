@@ -7,12 +7,32 @@
 
 import { tool, z } from '@cyanheads/mcp-ts-core';
 import { JsonRpcErrorCode, McpError } from '@cyanheads/mcp-ts-core/errors';
+import { escapeMarkdownInline, markdownLink } from '@cyanheads/mcp-ts-core/utils';
+import { dateWindow } from '@/services/finnhub/date-window.js';
 import { getFinnhubService } from '@/services/finnhub/finnhub-service.js';
+import { normalizeArticleText } from '@/services/finnhub/normalize-article-text.js';
 import type { FinnhubNewsArticle } from '@/services/finnhub/types.js';
+import { pageWindow, windowPageEnrichment } from './window-page.js';
 
-/** Format a Date as YYYY-MM-DD (UTC). */
-function isoDate(date: Date): string {
-  return date.toISOString().slice(0, 10);
+function isoTimestamp(seconds: number): string {
+  return new Date(seconds * 1000).toISOString();
+}
+
+function compareText(a: string, b: string): number {
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
+function articleTie(a: FinnhubNewsArticle, b: FinnhubNewsArticle): number {
+  const idOrder = a.id === b.id ? 0 : (a.id ?? Infinity) - (b.id ?? Infinity);
+  return (
+    idOrder ||
+    compareText(a.headline, b.headline) ||
+    compareText(a.url, b.url) ||
+    compareText(a.source, b.source) ||
+    compareText(a.summary ?? '', b.summary ?? '') ||
+    compareText(a.category ?? '', b.category ?? '') ||
+    compareText(a.related ?? '', b.related ?? '')
+  );
 }
 
 /** Normalize a raw Finnhub article to the output shape (epoch → ISO). */
@@ -26,10 +46,10 @@ function normalizeArticle(a: FinnhubNewsArticle): {
   related?: string;
 } {
   return {
-    headline: a.headline,
+    headline: normalizeArticleText(a.headline),
     source: a.source,
-    datetime: new Date(a.datetime * 1000).toISOString(),
-    summary: a.summary ?? '',
+    datetime: isoTimestamp(a.datetime),
+    summary: normalizeArticleText(a.summary ?? ''),
     url: a.url,
     ...(a.category ? { category: a.category } : {}),
     ...(a.related ? { related: a.related } : {}),
@@ -57,8 +77,15 @@ export const getNews = tool('finnhub_get_news', {
     from: z
       .string()
       .optional()
-      .describe('Company mode: window start (YYYY-MM-DD). Defaults to today − 7 days.'),
-    to: z.string().optional().describe('Company mode: window end (YYYY-MM-DD). Defaults to today.'),
+      .describe(
+        'Company mode: window start (YYYY-MM-DD). Omitted or empty defaults to today − 7 days in UTC.',
+      ),
+    to: z
+      .string()
+      .optional()
+      .describe(
+        'Company mode: window end (YYYY-MM-DD). Omitted or empty defaults to today in UTC.',
+      ),
     category: z
       .enum(['general', 'forex', 'crypto', 'merger'])
       .default('general')
@@ -70,6 +97,14 @@ export const getNews = tool('finnhub_get_news', {
       .max(100)
       .default(15)
       .describe('Max articles (1–100). Default 15 — news lists run long; keep context lean.'),
+    offset: z
+      .number()
+      .int()
+      .nonnegative()
+      .optional()
+      .describe(
+        'Company mode only. Zero-based article offset (default 0). Use nextOffset to continue. Each page refetches Finnhub, so results may shift.',
+      ),
   }),
   output: z.object({
     mode: z.enum(['company', 'market']).describe('The mode used (echo of input).'),
@@ -77,10 +112,10 @@ export const getNews = tool('finnhub_get_news', {
       .array(
         z
           .object({
-            headline: z.string().describe('Article headline.'),
+            headline: z.string().describe('Article headline as text.'),
             source: z.string().describe('Publisher name.'),
             datetime: z.string().describe('Publish time, ISO 8601.'),
-            summary: z.string().describe('Article summary (may be empty).'),
+            summary: z.string().describe('Article summary as text (may be empty).'),
             url: z.string().describe('Link to the article.'),
             category: z
               .string()
@@ -96,14 +131,32 @@ export const getNews = tool('finnhub_get_news', {
   }),
 
   enrichment: {
-    totalCount: z.number().describe('Total articles available before the limit.'),
-    truncated: z.boolean().optional().describe('True when articles were capped at the limit.'),
+    ...windowPageEnrichment,
+    totalCount: z.number().describe('Articles fetched from Finnhub before local paging.'),
+    truncated: z
+      .boolean()
+      .optional()
+      .describe('True when fetched articles remain after this page.'),
     shown: z.number().optional().describe('Number of articles returned.'),
     cap: z.number().optional().describe('The limit that was applied.'),
-    notice: z.string().optional().describe('Guidance when no articles were found.'),
+    notice: z.string().optional().describe('Empty-result, upstream coverage, or paging guidance.'),
   },
 
   errors: [
+    {
+      reason: 'invalid_date',
+      code: JsonRpcErrorCode.ValidationError,
+      when: 'A company-news date bound is not a real YYYY-MM-DD calendar date.',
+      recovery: 'Use YYYY-MM-DD for a real calendar date.',
+      thrownBy: 'service',
+    },
+    {
+      reason: 'inverted_date_window',
+      code: JsonRpcErrorCode.ValidationError,
+      when: 'The resolved company-news start date is later than the end date.',
+      recovery: 'Choose a start date on or before the end date.',
+      thrownBy: 'service',
+    },
     {
       reason: 'missing_symbol',
       code: JsonRpcErrorCode.ValidationError,
@@ -120,7 +173,8 @@ export const getNews = tool('finnhub_get_news', {
 
   async handler(input, ctx) {
     const service = getFinnhubService();
-    let raw: FinnhubNewsArticle[];
+    let page: FinnhubNewsArticle[];
+    let total: number;
 
     if (input.mode === 'company') {
       if (!input.symbol) {
@@ -129,9 +183,8 @@ export const getNews = tool('finnhub_get_news', {
         });
       }
       const symbol = input.symbol;
-      const today = new Date();
-      const from = input.from || isoDate(new Date(today.getTime() - 7 * 86_400_000));
-      const to = input.to || isoDate(today);
+      const { from, to } = dateWindow(input, -7, 0);
+      let raw: FinnhubNewsArticle[];
       try {
         raw = await service.companyNews(symbol, from, to, ctx);
       } catch (err) {
@@ -148,28 +201,41 @@ export const getNews = tool('finnhub_get_news', {
           `No articles for "${symbol}" between ${from} and ${to}. Widen the date range.`,
         );
       }
+      const rows = raw.toSorted((a, b) => b.datetime - a.datetime || articleTie(a, b));
+      const newest = rows[0];
+      const oldest = rows.at(-1);
+      page = pageWindow(
+        rows,
+        input,
+        ctx,
+        newest && oldest
+          ? {
+              fetchedFrom: isoTimestamp(oldest.datetime),
+              fetchedTo: isoTimestamp(newest.datetime),
+              warning:
+                'Finnhub may omit articles in the requested window. Try a narrower window or an earlier to date for older articles.',
+            }
+          : undefined,
+      );
+      total = rows.length;
     } else {
-      raw = await service.marketNews(input.category, ctx);
-      if (raw.length === 0) {
+      const rows = await service.marketNews(input.category, ctx);
+      total = rows.length;
+      if (total === 0) {
         ctx.enrich.notice(`No articles in the "${input.category}" category right now.`);
       }
-    }
-
-    const articles = raw.map(normalizeArticle).sort((a, b) => b.datetime.localeCompare(a.datetime));
-
-    ctx.enrich.total(articles.length);
-    const sliced = articles.slice(0, input.limit);
-    if (articles.length > input.limit) {
-      ctx.enrich.truncated({ shown: sliced.length, cap: input.limit });
+      ctx.enrich.total(total);
+      page = rows.toSorted((a, b) => b.datetime - a.datetime).slice(0, input.limit);
+      if (total > input.limit) ctx.enrich.truncated({ shown: page.length, cap: input.limit });
     }
 
     ctx.log.info('News fetched', {
       mode: input.mode,
-      total: articles.length,
-      returned: sliced.length,
+      total,
+      returned: page.length,
     });
 
-    return { mode: input.mode, articles: sliced };
+    return { mode: input.mode, articles: page.map(normalizeArticle) };
   },
 
   format: (result) => {
@@ -179,11 +245,12 @@ export const getNews = tool('finnhub_get_news', {
     }
     const lines: string[] = [header, ''];
     for (const a of result.articles) {
-      const tag = a.category ? ` [${a.category}]` : '';
-      const related = a.related ? ` · related: ${a.related}` : '';
-      lines.push(`**${a.headline}** — ${a.source}, ${a.datetime}${tag}${related}`);
-      if (a.summary) lines.push(a.summary);
-      lines.push(a.url);
+      const headline = a.headline ? `**${escapeMarkdownInline(a.headline)}** ` : '';
+      const tag = a.category ? ` ${escapeMarkdownInline(`[${a.category}]`)}` : '';
+      const related = a.related ? ` · related: ${escapeMarkdownInline(a.related)}` : '';
+      lines.push(`${headline}— ${escapeMarkdownInline(a.source)}, ${a.datetime}${tag}${related}`);
+      if (a.summary) lines.push('', escapeMarkdownInline(a.summary));
+      lines.push('', markdownLink(a.url, a.url));
       lines.push('');
     }
     return [{ type: 'text', text: lines.join('\n').trimEnd() }];

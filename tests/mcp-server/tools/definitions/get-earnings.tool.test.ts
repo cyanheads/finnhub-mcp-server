@@ -301,6 +301,239 @@ describe('getEarnings', () => {
     }
   });
 
+  it('treats empty calendar date strings as omitted and ignores unused history dates', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-06-13T12:00:00Z'));
+    try {
+      mockService({ earnings: () => [], earningsCalendar: () => ({ earningsCalendar: [] }) });
+      const calendar = await runToolContract(getEarnings, { mode: 'calendar', from: '', to: '' });
+      expect(calendar.isError).not.toBe(true);
+      expect(svc.getFinnhubService().earningsCalendar).toHaveBeenCalledWith(
+        '2026-06-13',
+        '2026-06-27',
+        undefined,
+        expect.anything(),
+      );
+      const history = await runToolContract(getEarnings, {
+        mode: 'history',
+        symbol: 'AAPL',
+        from: 'next week',
+        to: '2026-02-31',
+      });
+      expect(history.isError).not.toBe(true);
+      expect(svc.getFinnhubService().earnings).toHaveBeenCalledWith('AAPL', expect.anything());
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it.each([
+    { from: '2026-02-29', to: '2026-03-01', reason: 'invalid_date', value: '2026-02-29' },
+    { from: '02/28/2026', to: '2026-03-01', reason: 'invalid_date', value: '02/28/2026' },
+    { from: '2026-07-01', to: '', reason: 'inverted_date_window', value: '2026-06-27' },
+  ])('rejects invalid calendar bounds before fetching ($from to $to)', async (test) => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-06-13T12:00:00Z'));
+    try {
+      mockService({ earningsCalendar: () => ({ earningsCalendar: [] }) });
+      const result = await runToolContract(getEarnings, {
+        mode: 'calendar',
+        from: test.from,
+        to: test.to,
+      });
+      expect(result.structuredContent).toMatchObject({
+        error: {
+          code: JsonRpcErrorCode.ValidationError,
+          data: { reason: test.reason, recovery: { hint: expect.any(String) } },
+        },
+      });
+      expect(result.content).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ text: expect.stringContaining(test.value) }),
+        ]),
+      );
+      expect(svc.getFinnhubService().earningsCalendar).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('accepts a same-day leap-date window and leaves empty bounds absent', async () => {
+    mockService({ earningsCalendar: () => ({ earningsCalendar: [] }) });
+    const result = await runToolContract(getEarnings, {
+      mode: 'calendar',
+      from: '2028-02-29',
+      to: '2028-02-29',
+    });
+    expect(result.structuredContent).toMatchObject({ calendar: [], totalCount: 0 });
+    expect(result.structuredContent).not.toHaveProperty('fetchedFrom');
+    expect(svc.getFinnhubService().earningsCalendar).toHaveBeenCalledWith(
+      '2028-02-29',
+      '2028-02-29',
+      undefined,
+      expect.anything(),
+    );
+  });
+
+  it('exposes page continuation, full fetched bounds, and calendar actuals on both surfaces', async () => {
+    const raw = [
+      {
+        symbol: 'BRAVO',
+        date: '2026-06-20',
+        hour: 'dmh',
+        quarter: 2,
+        year: 2026,
+        epsActual: 0,
+        revenueActual: 50,
+        epsEstimate: 1,
+        revenueEstimate: 51,
+      },
+      {
+        symbol: 'ALPHA',
+        date: '2026-06-20',
+        hour: '',
+        quarter: 2,
+        year: 2026,
+        epsActual: null,
+        revenueActual: null,
+        epsEstimate: 1,
+        revenueEstimate: 51,
+      },
+      {
+        symbol: 'CHARLIE',
+        date: '2026-06-22',
+        hour: '',
+        quarter: 2,
+        year: 2026,
+        epsActual: null,
+        revenueActual: null,
+        epsEstimate: 1,
+        revenueEstimate: 51,
+      },
+    ];
+    mockService({ earningsCalendar: () => ({ earningsCalendar: raw.reverse() }) });
+    const input = { mode: 'calendar' as const, from: '2026-06-19', to: '2026-06-23', limit: 1 };
+    const first = await runToolContract(getEarnings, input);
+    expect(first.structuredContent).toMatchObject({
+      calendar: [{ symbol: 'ALPHA', epsActual: null, revenueActual: null }],
+      totalCount: 3,
+      fetchedFrom: '2026-06-20',
+      fetchedTo: '2026-06-22',
+      nextOffset: 1,
+      truncated: true,
+    });
+    const firstText = JSON.stringify(first.content);
+    expect(firstText).toContain('2026-06-22');
+    expect(firstText).toContain('offset');
+    const second = await runToolContract(getEarnings, { ...input, offset: 1 });
+    expect(second.structuredContent).toMatchObject({
+      calendar: [{ symbol: 'BRAVO', epsActual: 0, revenueActual: 50, hour: 'dmh' }],
+      nextOffset: 2,
+    });
+    expect(JSON.stringify(second.content)).toContain('EPS actual 0');
+    expect(JSON.stringify(second.content)).toContain('revenue actual 50');
+    const last = await runToolContract(getEarnings, { ...input, offset: 2 });
+    expect(last.structuredContent).toMatchObject({
+      calendar: [{ symbol: 'CHARLIE' }],
+      totalCount: 3,
+    });
+    expect(last.structuredContent).not.toHaveProperty('nextOffset');
+    const exhausted = await runToolContract(getEarnings, { ...input, offset: 4 });
+    expect(exhausted.structuredContent).toMatchObject({ calendar: [], totalCount: 3 });
+    expect(exhausted.structuredContent).not.toHaveProperty('nextOffset');
+    expect(JSON.stringify(exhausted.content)).not.toContain('Widen');
+  });
+
+  it('reports the upstream cap alongside local continuation', async () => {
+    const row = {
+      symbol: 'EXAMPLE',
+      date: '2026-06-20',
+      hour: '',
+      quarter: 2,
+      year: 2026,
+      epsActual: null,
+      revenueActual: null,
+      epsEstimate: null,
+      revenueEstimate: null,
+    };
+    mockService({
+      earningsCalendar: () => ({ earningsCalendar: Array.from({ length: 1500 }, () => row) }),
+    });
+    const result = await runToolContract(getEarnings, { mode: 'calendar', limit: 1 });
+    expect(result.structuredContent).toMatchObject({
+      totalCount: 1500,
+      nextOffset: 1,
+      notice: expect.stringMatching(/upstream.*offset/i),
+    });
+    expect(JSON.stringify(result.content)).toMatch(/upstream.*offset/i);
+  });
+
+  it('represents omitted calendar actuals as unavailable on both surfaces', async () => {
+    mockService({
+      earningsCalendar: () => ({
+        earningsCalendar: [
+          {
+            symbol: 'EXAMPLE',
+            date: '2026-06-20',
+            hour: '',
+            quarter: 2,
+            year: 2026,
+            epsEstimate: 1,
+            revenueEstimate: 10,
+          },
+        ],
+      }),
+    });
+    const result = await runToolContract(getEarnings, { mode: 'calendar' });
+    expect(result.structuredContent).toMatchObject({
+      calendar: [{ epsActual: null, revenueActual: null }],
+    });
+    expect(JSON.stringify(result.content)).toContain('EPS actual n/a, revenue actual n/a');
+  });
+
+  it('accepts a history limit above 100 and still rejects it for calendar mode', async () => {
+    mockService({
+      earnings: () => [
+        {
+          symbol: 'AAPL',
+          period: '2026-03-31',
+          year: 2026,
+          quarter: 2,
+          actual: 2,
+          estimate: 1,
+          surprise: 1,
+          surprisePercent: 100,
+        },
+      ],
+    });
+    const history = await runToolContract(getEarnings, {
+      mode: 'history',
+      symbol: 'AAPL',
+      limit: 101,
+    });
+    expect(history.structuredContent).toMatchObject({
+      history: [{ period: '2026-03-31' }],
+      totalCount: 1,
+    });
+    expect(JSON.stringify(history.content)).toContain('2026-03-31');
+    const calendar = await runToolContract(getEarnings, { mode: 'calendar', limit: 101 });
+    expect(calendar.structuredContent).toMatchObject({
+      error: {
+        code: JsonRpcErrorCode.ValidationError,
+        data: { reason: 'calendar_limit_exceeded' },
+      },
+    });
+    expect(JSON.stringify(calendar.content)).toContain('nextOffset');
+    expect(svc.getFinnhubService().earningsCalendar).not.toHaveBeenCalled();
+  });
+
+  it.each([-1, 1.5])('rejects invalid calendar offset %s', async (offset) => {
+    mockService({ earningsCalendar: () => ({ earningsCalendar: [] }) });
+    const result = await runToolContract(getEarnings, { mode: 'calendar', offset });
+    expect(result.isError).toBe(true);
+    expect(svc.getFinnhubService().earningsCalendar).not.toHaveBeenCalled();
+  });
+
   it('calendar mode treats an empty symbol as an omitted market-wide filter', async () => {
     const earningsCalendar = vi.fn(() => ({ earningsCalendar: [] }));
     mockService({ earningsCalendar });
@@ -475,7 +708,9 @@ describe('getEarnings', () => {
           symbol: 'AAPL',
           date: '2026-07-30',
           hour: 'amc',
+          epsActual: null,
           epsEstimate: 1.42,
+          revenueActual: null,
           revenueEstimate: 92_000_000_000,
           year: 2026,
           quarter: 3,

@@ -93,7 +93,7 @@ describe('getRecommendations', () => {
     expect(svc.getFinnhubService().recommendations).toHaveBeenCalledTimes(1);
   });
 
-  it('caps available history without inventing older months and keeps limit bounds', async () => {
+  it('accepts a high limit without inventing older months', async () => {
     mockRecs(() => [
       {
         symbol: 'AAPL',
@@ -107,14 +107,14 @@ describe('getRecommendations', () => {
     ]);
     const ctx = createMockContext({ errors: getRecommendations.errors });
     const result = await getRecommendations.handler(
-      getRecommendations.input.parse({ symbol: 'AAPL', limit: 24 }),
+      getRecommendations.input.parse({ symbol: 'AAPL', limit: 25 }),
       ctx,
     );
     expect(result.trends).toHaveLength(1);
     expect(getEnrichment(ctx)).toEqual({ totalCount: 1 });
     expect(getRecommendations.input.parse({ symbol: 'AAPL' }).limit).toBe(12);
     expect(() => getRecommendations.input.parse({ symbol: 'AAPL', limit: 0 })).toThrow();
-    expect(() => getRecommendations.input.parse({ symbol: 'AAPL', limit: 25 })).toThrow();
+    expect(() => getRecommendations.input.parse({ symbol: 'AAPL', limit: 1.5 })).toThrow();
     expect(getRecommendations.format!(result)).toEqual([
       expect.objectContaining({
         text: expect.stringContaining('2026-10-01: 1 strong-buy / 2 buy / 3 hold'),

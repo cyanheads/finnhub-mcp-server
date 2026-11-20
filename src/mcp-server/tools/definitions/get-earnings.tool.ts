@@ -1,29 +1,29 @@
 /**
  * @fileoverview finnhub_get_earnings — earnings in two modes. `history`: a
  * symbol's past quarters with actual-vs-estimate surprises. `calendar`:
- * upcoming releases in a date window, optionally filtered by symbol.
+ * releases in a date window, optionally filtered by symbol.
  * Mode-consolidated because both are the same noun (earnings) from two angles.
  * @module mcp-server/tools/definitions/get-earnings.tool
  */
 
 import { tool, z } from '@cyanheads/mcp-ts-core';
 import { JsonRpcErrorCode, McpError } from '@cyanheads/mcp-ts-core/errors';
+import { dateWindow } from '@/services/finnhub/date-window.js';
 import { getFinnhubService } from '@/services/finnhub/finnhub-service.js';
+import { pageWindow, windowPageEnrichment } from './window-page.js';
 
-/** Format a Date as YYYY-MM-DD (UTC). */
-function isoDate(date: Date): string {
-  return date.toISOString().slice(0, 10);
-}
+const CALENDAR_PAGE_LIMIT = 100;
+const CALENDAR_UPSTREAM_CAP = 1500;
 
 export const getEarnings = tool('finnhub_get_earnings', {
   description:
-    "Earnings data in two modes. 'history': a symbol's past quarters — actual vs. estimate EPS, surprise %, period (the surprise is the market-moving signal, surfaced prominently); requires `symbol`. 'calendar': upcoming releases in a date window — date, EPS/revenue estimates, symbol; uses `from`/`to` and optionally filters by `symbol`. Resolve a company name with finnhub_search_symbols first.",
+    "Earnings data in two modes. 'history': a symbol's past quarters with reported vs. estimated EPS and surprise; requires `symbol`. 'calendar': releases in a date window with EPS and revenue estimates and actuals where Finnhub provides them for recently reported releases. Uses `from`/`to` and optionally filters by `symbol`. Resolve a company name with finnhub_search_symbols first.",
   annotations: { readOnlyHint: true, openWorldHint: true },
   input: z.object({
     mode: z
       .enum(['history', 'calendar'])
       .describe(
-        "'history' = one symbol's past quarters with actual-vs-estimate surprises (requires `symbol`). 'calendar' = upcoming releases in a date window, optionally filtered by `symbol` (uses `from`/`to`).",
+        "'history' = one symbol's past quarters with actual-vs-estimate surprises (requires `symbol`). 'calendar' = releases in a date window, optionally filtered by `symbol` (uses `from`/`to`).",
       ),
     symbol: z
       .string()
@@ -36,20 +36,31 @@ export const getEarnings = tool('finnhub_get_earnings', {
     from: z
       .string()
       .optional()
-      .describe('Calendar mode: window start (YYYY-MM-DD). Defaults to today when omitted.'),
+      .describe(
+        'Calendar mode: window start (YYYY-MM-DD). Omitted or empty defaults to today (UTC).',
+      ),
     to: z
       .string()
       .optional()
       .describe(
-        'Calendar mode: window end (YYYY-MM-DD). Defaults to today + 14 days when omitted.',
+        'Calendar mode: window end (YYYY-MM-DD). Omitted or empty defaults to today + 14 days (UTC).',
       ),
     limit: z
       .number()
       .int()
       .min(1)
-      .max(100)
       .default(50)
-      .describe('Max rows returned (history quarters or calendar entries). Default 50.'),
+      .describe(
+        `Max rows returned. Default 50. Calendar mode allows at most ${CALENDAR_PAGE_LIMIT} per page.`,
+      ),
+    offset: z
+      .number()
+      .int()
+      .min(0)
+      .optional()
+      .describe(
+        'Calendar mode: zero-based offset in fetched rows. Omitted starts at the first row.',
+      ),
   }),
   output: z.object({
     mode: z.enum(['history', 'calendar']).describe('The mode used (echo of input).'),
@@ -79,10 +90,13 @@ export const getEarnings = tool('finnhub_get_earnings', {
         z
           .object({
             symbol: z.string().describe('Stock ticker.'),
-            date: z.string().describe('Expected report date (YYYY-MM-DD).'),
+            date: z.string().describe('Report date (YYYY-MM-DD).'),
             hour: z
               .string()
-              .describe('"bmo" (before open) / "amc" (after close) / "" when unknown.'),
+              .describe(
+                '"bmo" (before open) / "amc" (after close) / "dmh" (during market hours) / "" when unknown.',
+              ),
+            epsActual: z.number().nullable().describe('Reported EPS. Null when unavailable.'),
             epsEstimate: z
               .number()
               .nullable()
@@ -95,23 +109,31 @@ export const getEarnings = tool('finnhub_get_earnings', {
               .describe(
                 'Consensus revenue estimate in the reporting currency. Null when unavailable.',
               ),
+            revenueActual: z
+              .number()
+              .nullable()
+              .describe('Reported revenue in the reporting currency. Null when unavailable.'),
             year: z.number().describe('Fiscal year.'),
             quarter: z.number().describe('Fiscal quarter (1–4).'),
           })
-          .describe('One upcoming earnings release.'),
+          .describe('One earnings release.'),
       )
       .optional()
       .describe(
-        'Present in `calendar` mode. Sorted by date. Note: `epsActual` and `revenueActual` are not surfaced here — this tool is for the upcoming-releases workflow; actuals are available in `history` mode for a specific symbol.',
+        'Present in `calendar` mode, sorted by date then symbol. Actuals can be available for recently reported releases.',
       ),
   }),
 
   enrichment: {
-    totalCount: z.number().describe('Total rows available before the limit.'),
+    totalCount: z.number().describe('Number of rows fetched from Finnhub before local paging.'),
     truncated: z.boolean().optional().describe('True when rows were capped at the limit.'),
     shown: z.number().optional().describe('Number of rows returned.'),
     cap: z.number().optional().describe('The limit that was applied.'),
-    notice: z.string().optional().describe('Guidance when the result set is empty.'),
+    notice: z
+      .string()
+      .optional()
+      .describe('Guidance about empty windows, coverage, or continuation.'),
+    ...windowPageEnrichment,
   },
 
   errors: [
@@ -120,7 +142,27 @@ export const getEarnings = tool('finnhub_get_earnings', {
       code: JsonRpcErrorCode.ValidationError,
       when: "mode 'history' was requested without a symbol.",
       recovery:
-        'Provide a `symbol` for history mode, or switch to mode: calendar for the market-wide upcoming-releases feed.',
+        'Provide a `symbol` for history mode, or switch to calendar mode for market-wide releases.',
+    },
+    {
+      reason: 'invalid_date',
+      code: JsonRpcErrorCode.ValidationError,
+      when: 'A calendar bound is not a real YYYY-MM-DD date.',
+      recovery: 'Use YYYY-MM-DD for a real calendar date.',
+      thrownBy: 'service',
+    },
+    {
+      reason: 'inverted_date_window',
+      code: JsonRpcErrorCode.ValidationError,
+      when: 'The resolved calendar start date is later than the end date.',
+      recovery: 'Choose a start date on or before the end date.',
+      thrownBy: 'service',
+    },
+    {
+      reason: 'calendar_limit_exceeded',
+      code: JsonRpcErrorCode.ValidationError,
+      when: `Calendar mode requested more than ${CALENDAR_PAGE_LIMIT} rows per page.`,
+      recovery: `Use a limit of ${CALENDAR_PAGE_LIMIT} or less and continue with nextOffset.`,
     },
     {
       reason: 'not_us_or_paid',
@@ -177,10 +219,10 @@ export const getEarnings = tool('finnhub_get_earnings', {
       return { mode: 'history' as const, history: sliced };
     }
 
-    // calendar mode
-    const today = new Date();
-    const from = input.from || isoDate(today);
-    const to = input.to || isoDate(new Date(today.getTime() + 14 * 86_400_000));
+    if (input.limit > CALENDAR_PAGE_LIMIT) {
+      throw ctx.fail('calendar_limit_exceeded');
+    }
+    const { from, to } = dateWindow(input, 0, 14);
     const symbol = input.symbol || undefined;
 
     let raw: Awaited<ReturnType<typeof service.earningsCalendar>>;
@@ -202,27 +244,49 @@ export const getEarnings = tool('finnhub_get_earnings', {
         symbol: e.symbol,
         date: e.date,
         hour: e.hour,
+        epsActual: e.epsActual ?? null,
         epsEstimate: e.epsEstimate,
         revenueEstimate: e.revenueEstimate,
+        revenueActual: e.revenueActual ?? null,
         year: e.year,
         quarter: e.quarter,
       }))
-      .sort((a, b) => a.date.localeCompare(b.date));
+      .sort(
+        (a, b) =>
+          a.date.localeCompare(b.date) ||
+          a.symbol.localeCompare(b.symbol) ||
+          a.year - b.year ||
+          a.quarter - b.quarter ||
+          a.hour.localeCompare(b.hour) ||
+          JSON.stringify(a).localeCompare(JSON.stringify(b)),
+      );
 
-    ctx.enrich.total(calendar.length);
-    if (calendar.length === 0) {
+    const first = calendar[0];
+    const last = calendar.at(-1);
+    if (!first || !last) {
       ctx.enrich.notice(
         symbol
           ? `No earnings releases for "${symbol}" between ${from} and ${to}. Widen the date window.`
           : `No earnings releases between ${from} and ${to}. Widen the date window.`,
       );
     }
-    const sliced = calendar.slice(0, input.limit);
-    if (calendar.length > input.limit) {
-      ctx.enrich.truncated({ shown: sliced.length, cap: input.limit });
-    }
+    const page = pageWindow(
+      calendar,
+      input,
+      ctx,
+      first && last
+        ? {
+            fetchedFrom: first.date,
+            fetchedTo: last.date,
+            ...(calendar.length >= CALENDAR_UPSTREAM_CAP && {
+              warning:
+                'The upstream calendar reached its row ceiling and may omit releases. Narrow the window or move to an earlier end date to look for older rows.',
+            }),
+          }
+        : undefined,
+    );
 
-    return { mode: 'calendar' as const, calendar: sliced };
+    return { mode: 'calendar' as const, calendar: page };
   },
 
   format: (result) => {
@@ -235,9 +299,9 @@ export const getEarnings = tool('finnhub_get_earnings', {
           q.surprisePercent == null
             ? 'n/a'
             : `${q.surprisePercent > 0 ? '+' : ''}${q.surprisePercent.toFixed(2)}%`;
-        const actual = q.actualEPS == null ? 'n/a' : q.actualEPS;
-        const estimate = q.estimateEPS == null ? 'n/a' : q.estimateEPS;
-        const abs = q.surprise == null ? 'n/a' : q.surprise;
+        const actual = q.actualEPS ?? 'n/a';
+        const estimate = q.estimateEPS ?? 'n/a';
+        const abs = q.surprise ?? 'n/a';
         lines.push(
           `- ${q.period} (FY${q.year} Q${q.quarter}): actual ${actual} vs est ${estimate} → surprise ${surprise} (${abs} abs)`,
         );
@@ -245,19 +309,15 @@ export const getEarnings = tool('finnhub_get_earnings', {
     }
 
     if (result.calendar) {
-      lines.push('**Upcoming earnings** (by date):');
+      lines.push('**Earnings calendar** (by date):');
       for (const e of result.calendar) {
-        const eps = e.epsEstimate == null ? 'n/a' : e.epsEstimate;
-        const rev = e.revenueEstimate == null ? 'n/a' : e.revenueEstimate;
+        const eps = e.epsEstimate ?? 'n/a';
+        const rev = e.revenueEstimate ?? 'n/a';
         const hour = e.hour || 'time TBD';
         lines.push(
-          `- ${e.date} **${e.symbol}** (FY${e.year} Q${e.quarter}, ${hour}): EPS est ${eps}, revenue est ${rev}`,
+          `- ${e.date} **${e.symbol}** (FY${e.year} Q${e.quarter}, ${hour}): EPS est ${eps}, revenue est ${rev}, EPS actual ${e.epsActual ?? 'n/a'}, revenue actual ${e.revenueActual ?? 'n/a'}`,
         );
       }
-    }
-
-    if (lines.length === 0) {
-      lines.push('No earnings data.');
     }
 
     return [{ type: 'text', text: lines.join('\n') }];

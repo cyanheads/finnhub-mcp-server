@@ -116,12 +116,12 @@ export interface FinnhubEarning {
 /** A single entry from `GET /calendar/earnings`. */
 export interface FinnhubEarningsCalendarEntry {
   date: string;
-  epsActual: number | null;
+  epsActual?: number | null;
   epsEstimate: number | null;
-  /** "bmo" (before open) / "amc" (after close) / "" when unknown. */
+  /** "bmo" (before open), "amc" (after close), "dmh" (during market hours), or "" when unknown. */
   hour: string;
   quarter: number;
-  revenueActual: number | null;
+  revenueActual?: number | null;
   revenueEstimate: number | null;
   symbol: string;
   year: number;

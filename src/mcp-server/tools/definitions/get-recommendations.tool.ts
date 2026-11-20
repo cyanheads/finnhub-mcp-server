@@ -26,10 +26,9 @@ export const getRecommendations = tool('finnhub_get_recommendations', {
       .number()
       .int()
       .min(1)
-      .max(24)
       .default(12)
       .describe(
-        'Maximum months to return from available upstream history, newest first (1–24, default 12). Increasing the limit returns more available rows, not history absent from Finnhub.',
+        'Maximum months to return from available upstream history, newest first (default 12). Increasing the limit can return more rows within Finnhub’s available history.',
       ),
   }),
   output: z.object({
