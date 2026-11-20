@@ -64,6 +64,44 @@ describe('FinnhubService', () => {
     expect(calledUrl).toContain('/search');
     expect(calledUrl).toContain('q=apple');
     expect(calledUrl).toContain('token=test-key');
+    expect(new URL(calledUrl).searchParams.has('exchange')).toBe(false);
+  });
+
+  it('requests default peers with only the symbol and authentication', async () => {
+    fetchWithTimeoutMock.mockResolvedValue(okResponse(['AAPL', 'DELL']));
+    const service = new FinnhubService();
+
+    await expect(service.peers('AAPL', createMockContext())).resolves.toEqual(['AAPL', 'DELL']);
+
+    const calledUrl = new URL(String(fetchWithTimeoutMock.mock.calls[0]?.[0]));
+    expect(calledUrl.pathname).toBe('/api/v1/stock/peers');
+    expect(Object.fromEntries(calledUrl.searchParams)).toEqual({
+      symbol: 'AAPL',
+      token: 'test-key',
+    });
+  });
+
+  it('includes a supplied exchange in the symbol search URL', async () => {
+    fetchWithTimeoutMock.mockResolvedValue(okResponse({ count: 0, result: [] }));
+    const service = new FinnhubService();
+
+    await service.search('bank', createMockContext(), 'US');
+
+    const calledUrl = new URL(String(fetchWithTimeoutMock.mock.calls[0]?.[0]));
+    expect(calledUrl.pathname).toBe('/api/v1/search');
+    expect(calledUrl.searchParams.get('q')).toBe('bank');
+    expect(calledUrl.searchParams.get('exchange')).toBe('US');
+  });
+
+  it.each(['industry', 'sector'] as const)('sends the %s wire grouping', async (grouping) => {
+    fetchWithTimeoutMock.mockResolvedValue(okResponse(['AAPL']));
+    const service = new FinnhubService();
+
+    await service.peers('AAPL', createMockContext(), grouping);
+
+    const calledUrl = new URL(String(fetchWithTimeoutMock.mock.calls[0]?.[0]));
+    expect(calledUrl.searchParams.get('symbol')).toBe('AAPL');
+    expect(calledUrl.searchParams.get('grouping')).toBe(grouping);
   });
 
   it('re-keys a 401 to ConfigurationError (loud bad-key failure, not "no data")', async () => {

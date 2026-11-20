@@ -1,6 +1,6 @@
 /**
  * @fileoverview finnhub_get_company — full company context for one US symbol in
- * a single call: profile, headline fundamentals, and sector peers. Combines
+ * a single call: profile, headline fundamentals, and a selectable peer group. Combines
  * three endpoints so "tell me about Apple" needs one tool call, not three. The
  * profile is the spine (drives errors); metrics and peers degrade to partial.
  * @module mcp-server/tools/definitions/get-company.tool
@@ -11,6 +11,8 @@ import { JsonRpcErrorCode, McpError } from '@cyanheads/mcp-ts-core/errors';
 import { getFinnhubService } from '@/services/finnhub/finnhub-service.js';
 import type { FinnhubMetricResponse } from '@/services/finnhub/types.js';
 
+const peerGroupingSchema = z.enum(['subIndustry', 'industry', 'sector']);
+
 /** Pick a numeric metric, preserving absence as null (never zero-filled). */
 function metricNum(metric: FinnhubMetricResponse['metric'], key: string): number | null {
   const value = metric?.[key];
@@ -19,7 +21,7 @@ function metricNum(metric: FinnhubMetricResponse['metric'], key: string): number
 
 export const getCompany = tool('finnhub_get_company', {
   description:
-    'Full company context for one US symbol in a single call: profile (name, exchange, industry, country, market cap, shares outstanding, IPO date, website, logo), headline fundamentals (P/E, EPS, 52-week range, beta, dividend yield, margins, growth), and sector peers. Combines three endpoints so "tell me about Apple" needs one tool call, not three. Resolve a company name with finnhub_search_symbols first. International symbols are not on the free tier.',
+    'Full company context for one US symbol in a single call: profile (name, exchange, industry, country, market cap, shares outstanding, IPO date, website, logo), headline fundamentals (P/E, EPS, 52-week range, beta, dividend yield, margins, growth), and peers by sub-industry (default), industry, or sector. Resolve a company name with finnhub_search_symbols first. International symbols are not on the free tier.',
   annotations: { readOnlyHint: true, openWorldHint: true },
   input: z.object({
     symbol: z
@@ -30,6 +32,9 @@ export const getCompany = tool('finnhub_get_company', {
       .describe(
         'US stock ticker (e.g., "AAPL"), trimmed and uppercased with punctuation preserved. Resolve a company name with finnhub_search_symbols first. International symbols are not on the free tier.',
       ),
+    peerGrouping: peerGroupingSchema
+      .default('subIndustry')
+      .describe('Peer group to request. Defaults to Finnhub’s sub-industry grouping.'),
   }),
   output: z.object({
     symbol: z.string().describe('The symbol queried, trimmed and uppercased.'),
@@ -71,9 +76,12 @@ export const getCompany = tool('finnhub_get_company', {
       .describe(
         'Curated headline fundamentals: P/E, EPS, 52-week range, beta, dividend yield, margins, and growth. Every field nullable — Finnhub omits metrics for thinly-covered names.',
       ),
+    peerGrouping: peerGroupingSchema.describe('The peer grouping requested from Finnhub.'),
     peers: z
       .array(z.string())
-      .describe('Sector peer symbols from Finnhub (includes the queried symbol). Empty when none.'),
+      .describe(
+        'Finnhub peer symbols for the selected grouping. The list can include the queried symbol.',
+      ),
     partial: z
       .array(z.string())
       .optional()
@@ -104,7 +112,11 @@ export const getCompany = tool('finnhub_get_company', {
     const [profileResult, metricsResult, peersResult] = await Promise.allSettled([
       service.profile(input.symbol, ctx),
       service.metrics(input.symbol, ctx),
-      service.peers(input.symbol, ctx),
+      service.peers(
+        input.symbol,
+        ctx,
+        input.peerGrouping === 'subIndustry' ? undefined : input.peerGrouping,
+      ),
     ]);
 
     // Profile leg drives errors.
@@ -169,6 +181,7 @@ export const getCompany = tool('finnhub_get_company', {
       symbol: input.symbol,
       profile,
       fundamentals,
+      peerGrouping: input.peerGrouping,
       peers,
       ...(partial.length > 0 && { partial }),
     };
@@ -214,7 +227,9 @@ export const getCompany = tool('finnhub_get_company', {
       lines.push('\n**Fundamentals:** Not available (thinly covered).');
     }
 
-    lines.push(`\n**Peers:** ${result.peers.length > 0 ? result.peers.join(', ') : 'None'}`);
+    lines.push(
+      `\n**Peers (${result.peerGrouping}):** ${result.peers.length > 0 ? result.peers.join(', ') : 'None'}`,
+    );
 
     if (result.partial && result.partial.length > 0) {
       lines.push(`\n⚠ partial: ${result.partial.join(', ')} unavailable`);

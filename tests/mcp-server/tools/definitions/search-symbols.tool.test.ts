@@ -3,7 +3,8 @@
  * @module tests/mcp-server/tools/definitions/search-symbols.tool.test
  */
 
-import { createMockContext, getEnrichment } from '@cyanheads/mcp-ts-core/testing';
+import { JsonRpcErrorCode } from '@cyanheads/mcp-ts-core/errors';
+import { createMockContext, getEnrichment, runToolContract } from '@cyanheads/mcp-ts-core/testing';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { searchSymbols } from '@/mcp-server/tools/definitions/search-symbols.tool.js';
 import * as svc from '@/services/finnhub/finnhub-service.js';
@@ -66,6 +67,105 @@ describe('searchSymbols', () => {
       'FIRST.L',
       'SECOND.L',
     ]);
+  });
+
+  it.each([
+    { query: 'sPy', symbol: 'SPY', displaySymbol: 'SPY', type: 'ETP' },
+    { query: 'tM', symbol: 'TM', displaySymbol: 'TM', type: 'ADR' },
+    { query: 'tOy', symbol: 'EXAMPLE.T', displaySymbol: 'TOY', type: 'ADR' },
+  ])('returns the exact $query match before applying a one-row limit', async (row) => {
+    const { query, ...exact } = row;
+    mockSearch(() => ({
+      count: 2,
+      result: [
+        { ...exact, description: 'Exact match' },
+        { symbol: 'OTHER', displaySymbol: 'OTHER', description: 'Other', type: 'Common Stock' },
+      ],
+    }));
+
+    const result = await runToolContract(searchSymbols, { query, limit: 1 });
+
+    expect(result.structuredContent).toMatchObject({
+      results: [exact],
+      totalCount: 2,
+      truncated: true,
+      shown: 1,
+      cap: 1,
+    });
+    expect(result.content[0]).toMatchObject({
+      text: expect.stringContaining(`**${exact.symbol}**`),
+    });
+  });
+
+  it('retains Finnhub order for duplicate exact matches across security types', async () => {
+    mockSearch(() => ({
+      count: 2,
+      result: ['ADR', 'Common Stock'].map((type) => ({
+        symbol: 'BABA',
+        displaySymbol: 'BABA',
+        description: 'Alibaba',
+        type,
+      })),
+    }));
+
+    const result = await runToolContract(searchSymbols, { query: 'BABA' });
+
+    expect(result.structuredContent).toMatchObject({
+      results: [{ type: 'ADR' }, { type: 'Common Stock' }],
+    });
+  });
+
+  it.each([true, false])(
+    'echoes the applied exchange with matches present: %s',
+    async (matched) => {
+      const results = matched
+        ? [
+            {
+              symbol: 'BAC',
+              displaySymbol: 'BAC',
+              description: 'Bank of America',
+              type: 'Common Stock',
+            },
+          ]
+        : [];
+      mockSearch(() => ({ count: results.length, result: results }));
+
+      const result = await runToolContract(searchSymbols, { query: 'bank', exchange: ' us ' });
+
+      expect(svc.getFinnhubService().search).toHaveBeenCalledWith('bank', expect.anything(), 'US');
+      expect(result.structuredContent).toMatchObject({ exchange: 'US', results });
+      expect(result.content[0]).toMatchObject({ text: expect.stringContaining('Exchange: US') });
+    },
+  );
+
+  it.each([undefined, '', '   '])('searches globally when the exchange is %j', async (exchange) => {
+    mockSearch(() => ({ count: 0, result: [] }));
+
+    const result = await runToolContract(searchSymbols, { query: 'bank', exchange });
+
+    expect(svc.getFinnhubService().search).toHaveBeenCalledWith(
+      'bank',
+      expect.anything(),
+      undefined,
+    );
+    expect(result.structuredContent).not.toHaveProperty('exchange');
+    expect(result.content[0]).toMatchObject({
+      text: expect.stringContaining('No matching symbols.'),
+    });
+  });
+
+  it('rejects a non-string exchange before making an upstream request', async () => {
+    const serviceGetter = vi.spyOn(svc, 'getFinnhubService');
+
+    const result = await runToolContract(
+      searchSymbols,
+      JSON.parse('{"query":"bank","exchange":{"code":"US"}}'),
+    );
+
+    expect(result.structuredContent).toMatchObject({
+      error: { code: JsonRpcErrorCode.InvalidParams },
+    });
+    expect(serviceGetter).not.toHaveBeenCalled();
   });
 
   it('accepts an exact 20-character query', async () => {

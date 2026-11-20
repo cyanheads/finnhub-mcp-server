@@ -50,9 +50,14 @@ export class FinnhubService {
     this.apiKey = serverConfig.apiKey;
   }
 
-  /** `GET /search?q={query}` — resolve a name/ticker fragment to symbols. */
-  search(query: string, ctx: Context): Promise<FinnhubSearchResponse> {
-    return this.request<FinnhubSearchResponse>('/search', { q: query }, 'search', ctx);
+  /** `GET /search` — resolve a name/ticker fragment globally or on one exchange. */
+  search(query: string, ctx: Context, exchange?: string): Promise<FinnhubSearchResponse> {
+    return this.request<FinnhubSearchResponse>(
+      '/search',
+      exchange === undefined ? { q: query } : { q: query, exchange },
+      'search',
+      ctx,
+    );
   }
 
   /** `GET /quote?symbol={symbol}` — real-time price snapshot. */
@@ -85,9 +90,14 @@ export class FinnhubService {
     );
   }
 
-  /** `GET /stock/peers?symbol={symbol}` — sector peer symbols (includes the query). */
-  peers(symbol: string, ctx: Context): Promise<string[]> {
-    return this.request<string[]>('/stock/peers', { symbol }, 'peers', ctx);
+  /** `GET /stock/peers` — omit grouping for Finnhub's default sub-industry peers. */
+  peers(symbol: string, ctx: Context, grouping?: 'industry' | 'sector'): Promise<string[]> {
+    return this.request<string[]>(
+      '/stock/peers',
+      grouping === undefined ? { symbol } : { symbol, grouping },
+      'peers',
+      ctx,
+    );
   }
 
   /** `GET /stock/earnings?symbol={symbol}` — past quarters, newest first. */

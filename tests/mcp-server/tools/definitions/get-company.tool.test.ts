@@ -99,8 +99,9 @@ describe('getCompany', () => {
     mockService({ profile: () => fullProfile, metrics: () => fullMetric, peers: () => [] });
     const service = svc.getFinnhubService();
     const result = await runToolContract(getCompany, { symbol: ' aApL ' });
-    for (const method of [service.profile, service.metrics, service.peers])
+    for (const method of [service.profile, service.metrics])
       expect(method).toHaveBeenCalledWith('AAPL', expect.anything());
+    expect(service.peers).toHaveBeenCalledWith('AAPL', expect.anything(), undefined);
     expect(result.structuredContent).toMatchObject({
       symbol: 'AAPL',
       profile: { name: 'Apple Inc' },
@@ -110,6 +111,65 @@ describe('getCompany', () => {
         expect.objectContaining({ text: expect.stringContaining('(AAPL)') }),
       ]),
     );
+  });
+
+  it.each([
+    { requested: undefined, selected: 'subIndustry', upstream: undefined },
+    { requested: 'subIndustry', selected: 'subIndustry', upstream: undefined },
+    { requested: 'industry', selected: 'industry', upstream: 'industry' },
+    { requested: 'sector', selected: 'sector', upstream: 'sector' },
+  ] as const)(
+    'echoes peer grouping "$selected" on both surfaces',
+    async ({ requested, selected, upstream }) => {
+      mockService({ profile: () => fullProfile, metrics: () => fullMetric, peers: () => ['AAPL'] });
+
+      const result = await runToolContract(getCompany, { symbol: 'AAPL', peerGrouping: requested });
+
+      expect(svc.getFinnhubService().peers).toHaveBeenCalledWith(
+        'AAPL',
+        expect.anything(),
+        upstream,
+      );
+      expect(result.structuredContent).toMatchObject({ peerGrouping: selected, peers: ['AAPL'] });
+      expect(result.content[0]).toMatchObject({
+        text: expect.stringContaining(`Peers (${selected})`),
+      });
+    },
+  );
+
+  it('rejects unsupported peer grouping before loading the service', async () => {
+    const serviceGetter = vi.spyOn(svc, 'getFinnhubService');
+
+    const result = await runToolContract(
+      getCompany,
+      JSON.parse('{"symbol":"AAPL","peerGrouping":"bogus"}'),
+    );
+
+    expect(result.structuredContent).toMatchObject({
+      error: { code: JsonRpcErrorCode.InvalidParams },
+    });
+    expect(serviceGetter).not.toHaveBeenCalled();
+  });
+
+  it('retains the requested grouping when only the peers request fails', async () => {
+    mockService({
+      profile: () => fullProfile,
+      metrics: () => fullMetric,
+      peers: () => new Error('peers unavailable'),
+    });
+
+    const result = await runToolContract(getCompany, { symbol: 'AAPL', peerGrouping: 'sector' });
+
+    expect(result.structuredContent).toMatchObject({
+      profile: { name: 'Apple Inc' },
+      fundamentals: { peTTM: 34.8 },
+      peerGrouping: 'sector',
+      peers: [],
+      partial: ['peers'],
+    });
+    expect(result.content[0]).toMatchObject({
+      text: expect.stringMatching(/Peers \(sector\).*None[\s\S]*partial: peers unavailable/),
+    });
   });
 
   it.each([
@@ -227,6 +287,7 @@ describe('getCompany', () => {
         revenueGrowthTTMYoy: null,
         roeTTM: null,
       },
+      peerGrouping: 'subIndustry',
       peers: [],
       partial: ['metrics'],
     });

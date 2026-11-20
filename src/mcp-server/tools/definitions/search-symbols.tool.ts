@@ -6,6 +6,7 @@
  */
 
 import { tool, z } from '@cyanheads/mcp-ts-core';
+import { escapeMarkdownInline } from '@cyanheads/mcp-ts-core/utils';
 import { getFinnhubService } from '@/services/finnhub/finnhub-service.js';
 
 /** Finnhub uses `.A` and `.B` for US class-share symbols as well as dots for exchanges. */
@@ -13,7 +14,7 @@ const US_CLASS_SHARE_SYMBOL = /^[A-Z]+\.[AB]$/;
 
 export const searchSymbols = tool('finnhub_search_symbols', {
   description:
-    'Resolve a company name or partial ticker to Finnhub stock symbols. The entry point for every other tool — users say "Microsoft", the rest of the surface needs "MSFT". Returns matched symbols with display symbol, description, and security type, best likely-US match first. Each result carries isLikelyUS, a symbol-format heuristic for likely free-tier availability; quote and profile responses remain authoritative.',
+    'Resolve a company name or partial ticker to Finnhub stock symbols. Returns matched symbols with display symbol, description, and security type. Exact ticker matches rank first, then likely-US Common Stock. Each result carries isLikelyUS, a symbol-format heuristic for likely free-tier availability; quote and profile responses remain authoritative.',
   annotations: { readOnlyHint: true, openWorldHint: true },
   input: z.object({
     query: z
@@ -32,11 +33,16 @@ export const searchSymbols = tool('finnhub_search_symbols', {
       .min(1)
       .max(50)
       .default(10)
+      .describe('Max symbols to return after ranking. Default 10.'),
+    exchange: z
+      .string()
+      .optional()
       .describe(
-        'Max symbols to return (Finnhub often returns 10–50 matches for a common word). Default 10. Likely-US Common Stock matches are surfaced first.',
+        'Finnhub exchange code, e.g. "US" for US listings. Omit or leave blank for global search. A filtered company-name search can miss listings found by a ticker search.',
       ),
   }),
   output: z.object({
+    exchange: z.string().optional().describe('Exchange filter sent to Finnhub, when applied.'),
     results: z
       .array(
         z
@@ -65,7 +71,9 @@ export const searchSymbols = tool('finnhub_search_symbols', {
           })
           .describe('A single matched symbol.'),
       )
-      .describe('Matched symbols, likely-US Common Stock first, then by Finnhub order.'),
+      .describe(
+        'Exact ticker matches first, then likely-US Common Stock, then other matches. Finnhub order is preserved within each group.',
+      ),
   }),
   enrichment: {
     totalCount: z
@@ -81,7 +89,8 @@ export const searchSymbols = tool('finnhub_search_symbols', {
   },
 
   async handler(input, ctx) {
-    const { count, result } = await getFinnhubService().search(input.query, ctx);
+    const exchange = input.exchange?.trim().toUpperCase() || undefined;
+    const { count, result } = await getFinnhubService().search(input.query, ctx, exchange);
 
     const mapped = result.map((match) => ({
       symbol: match.symbol,
@@ -91,13 +100,12 @@ export const searchSymbols = tool('finnhub_search_symbols', {
       isLikelyUS: !match.symbol.includes('.') || US_CLASS_SHARE_SYMBOL.test(match.symbol),
     }));
 
-    /**
-     * Stable sort: likely-US Common Stock first, preserving Finnhub's order
-     * within each group. ETFs and ETPs deliberately retain Finnhub's rank.
-     */
-    const rank = (r: (typeof mapped)[number]): number =>
-      r.isLikelyUS && r.type === 'Common Stock' ? 0 : 1;
-    const sorted = [...mapped].sort((a, b) => rank(a) - rank(b));
+    const query = input.query.toUpperCase();
+    const rank = (r: (typeof mapped)[number]): number => {
+      if (r.symbol.toUpperCase() === query || r.displaySymbol.toUpperCase() === query) return 0;
+      return r.isLikelyUS && r.type === 'Common Stock' ? 1 : 2;
+    };
+    mapped.sort((a, b) => rank(a) - rank(b));
 
     ctx.enrich.total(count);
     if (count === 0) {
@@ -106,7 +114,7 @@ export const searchSymbols = tool('finnhub_search_symbols', {
       );
     }
 
-    const results = sorted.slice(0, input.limit);
+    const results = mapped.slice(0, input.limit);
     if (count > input.limit) {
       ctx.enrich.truncated({ shown: results.length, cap: input.limit });
     }
@@ -117,20 +125,22 @@ export const searchSymbols = tool('finnhub_search_symbols', {
       returned: results.length,
     });
 
-    return { results };
+    return { ...(exchange && { exchange }), results };
   },
 
   format: (result) => {
-    if (result.results.length === 0) {
-      return [{ type: 'text', text: 'No matching symbols.' }];
-    }
-    const lines = result.results.map((r) => {
+    const lines: string[] = [];
+    if (result.exchange) lines.push(`Exchange: ${escapeMarkdownInline(result.exchange)}`, '');
+    if (result.results.length === 0) lines.push('No matching symbols.');
+    for (const r of result.results) {
       const region = r.isLikelyUS
         ? 'likely US (symbol heuristic)'
         : 'not likely US (exchange-suffix heuristic)';
       const type = r.type || 'Unknown type';
-      return `**${r.symbol}** — ${r.description} (${type}, ${region}) · display: ${r.displaySymbol}`;
-    });
+      lines.push(
+        `**${r.symbol}** — ${r.description} (${type}, ${region}) · display: ${r.displaySymbol}`,
+      );
+    }
     return [{ type: 'text', text: lines.join('\n') }];
   },
 });
